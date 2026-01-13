@@ -28,7 +28,9 @@ app.secret_key = os.urandom(24)
 watchdog = None  # Disabled to allow libcamera streaming
 
 # Motion detection service for recording motion events
-from motion_service import motion_service
+# Disabled temporarily due to camera lock conflict with streaming
+# TODO: Implement queue or locking mechanism to coordinate camera access
+motion_service = None
 
 battery = BatteryMonitor(enabled=True)
 
@@ -145,10 +147,7 @@ def setup_save():
     cfg["emergency_phone"] = request.form.get("emergency_phone", "")
     save_config(cfg)
     mark_first_run_complete()
-    # Start motion detection service after first run setup
-    if motion_service and not motion_service.running:
-        motion_service.start()
-    logger.info("[SETUP] First run completed. Motion detection started.")
+    logger.info("[SETUP] First run completed.")
     return redirect(url_for("index"))
 
 @app.route("/login", methods=["GET", "POST"])
@@ -213,10 +212,6 @@ def index():
         videos = get_recordings(cfg, limit=12)
         storage_used = get_storage_used_gb(cfg)
         history_count = count_recent_events(cfg, hours=24)
-        
-        # Ensure motion service is running
-        if motion_service and not motion_service.running:
-            motion_service.start()
         
         # Get better battery percentage (100% if external power)
         battery_percent = battery_status.get("percent")
