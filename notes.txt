@@ -259,6 +259,9 @@ pip install --upgrade numpy
 pip uninstall opencv-python opencv-python-headless opencv-contrib-python -y
 pip install opencv-python-headless
 
+If you see "NumPy 2.0.2" or "NumPy 1.x cannot be run in NumPy 2.0" error:
+pip install "numpy<2"
+
 --------------------------------------------
 7. RUN THE AUTOMATED SETUP SCRIPT
 --------------------------------------------
@@ -302,11 +305,13 @@ sudo journalctl -u mecamera.service -f
 --------------------------------------------
 
 NumPy/OpenCV compatibility error:
-If you see: "numpy.core.multiarray failed to import"
-Run: pip install --upgrade numpy
+If you see: "numpy.core.multiarray failed to import" or "_ARRAY_API not found"
+Run: pip install "numpy<2"
 Then: pip uninstall opencv-python opencv-python-headless opencv-contrib-python -y
 Finally: pip install opencv-python-headless
 Retry: python3 main.py
+
+(Note: Pi Zero 2 W ships with NumPy 2.x by default, which is incompatible with precompiled OpenCV)
 
 Camera shows "no cameras available":
 - Ensure legacy camera is disabled in raspi-config
