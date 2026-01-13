@@ -286,6 +286,13 @@ http://raspberrypi.local:8080
 
 You will see the FIRST RUN SETUP WIZARD.
 
+✓ Dashboard Working:
+- System Status shows "Active" and "Pipeline running"
+- Live Camera feed displays (slower on Pi Zero 2 W - ~1-2 FPS is normal)
+- Storage shows 0.0 GB initially (displays used space once recordings start)
+- Battery status shows power source
+- System monitors motion detection in background
+
 --------------------------------------------
 9. ENABLE AUTO-BOOT
 --------------------------------------------
@@ -332,6 +339,13 @@ Python import errors:
 Template rendering errors:
 - These have been fixed in the latest code
 - git pull origin main to get latest fixes
+
+Camera/Video performance:
+- Live feed is ~1-2 FPS on Pi Zero 2 W (normal for libcamera-still)
+- This is reliable but slower than traditional streaming
+- Storage displays 0.0 GB until first recording is captured
+- Once motion is detected, recordings will appear in storage
+
 --------------------------------------------
 Dashboard → “Send Last Clip to First Responders”
 
