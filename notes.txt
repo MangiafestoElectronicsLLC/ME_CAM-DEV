@@ -412,13 +412,117 @@ This wipes:
 - exports
 
 --------------------------------------------
-10. SELF UPDATE
+12. SELF UPDATE
 --------------------------------------------
 ./self_update.sh
 
 Pulls latest DEV branch, reinstalls dependencies, restarts service.
 
---------------------------------------------
+====================================================
+RECENT FIXES & IMPROVEMENTS (Session: Jan 13, 2026)
+====================================================
+
+✅ MOTION DETECTION NOW WORKING
+- Motion detection service enabled and auto-starts on app boot
+- Motion events save 30-second clips to ~/ME_CAM-DEV/recordings/
+- Service runs in background thread without blocking camera streaming
+- Checks for motion every 2 seconds
+- Starts recording when motion detected, stops after 5 seconds of no motion
+- Logs all motion events with [MOTION] prefix in logs/mecam.log
+
+✅ STORAGE DISPLAY FIXED
+- Dashboard now shows real-time storage usage (Used/Available/Total/Files)
+- Fetches via /api/storage endpoint every page load
+- Displays storage bar with usage percentage
+- Recordings show size, date, and download/delete options
+- "Clear All Recordings" button to wipe all videos
+
+✅ POWER SUPPLY MEASUREMENT IMPROVED
+- Battery percent now defaults to 100% when external power detected
+- Dashboard shows "External Power" label when plugged in
+- Detects undervoltage via vcgencmd automatically
+- For actual battery monitoring, hardware HAT with ADC required
+- Can manually override battery % in config.json: "battery_percent_override": 80
+
+✅ VIDEO STREAMING OPTIMIZED
+- Already set to 2 FPS (0.5 second frame delay) on Pi Zero 2 W
+- This is the optimal speed for the  hardware
+- Uses libcamera-still with -t 100 (100ms timeout) and --immediate flag
+- Reliable MJPEG stream to web dashboard
+
+✅ FIRST-BOOT AUTO-SETUP ENABLED
+- Motion detection starts automatically after first-run setup completed
+- Dashboard ensures motion service running on every page load
+- If disabled, service still starts (can configure later in settings)
+- User guided through setup wizard on first access
+
+====================================================
+CODE CHANGES MADE
+====================================================
+
+main.py:
+- Added motion_service import
+- Motion service starts on app startup
+- Logging confirms service initiated
+
+web/app.py:
+- Enabled motion_service import (was disabled)
+- Dashboard ensures motion service running
+- Better battery percentage defaults (100% on external power)
+- Fixed status.active to True (no watchdog dependency)
+- First-run setup now starts motion service after completion
+
+config_manager.py:
+- Added _merge_configs() function
+- Merges user config with defaults (adds missing keys)
+- Fixes issues when recordings_dir missing from config.json
+- Prevents KeyError exceptions when old configs lack new fields
+
+libcamera_motion_detector.py:
+- Fixed subprocess call: removed invalid capture_output + stderr combo
+- Now uses stdout=DEVNULL, stderr=DEVNULL correctly
+- Timeout set to 2 seconds for frame capture
+- Motion detection runs every 2 seconds in background
+
+web/templates/user_dashboard.html:
+- Improved camera feed display with proper aspect ratio
+- Fixed MJPEG stream display (img src=/api/stream works)
+
+etc/systemd/system/mecamera.service:
+- Paths corrected to /ME_CAM-DEV
+- Added Type=simple and RestartSec=10
+- Service auto-restarts on failure
+
+====================================================
+WHAT TO EXPECT NOW
+====================================================
+
+When you boot your Pi:
+1. Systemd service starts mecamera automatically
+2. Flask app launches on port 8080
+3. Motion detection service initializes in background
+4. Access at http://raspberrypi.local:8080
+5. Dashboard shows live camera + storage info
+
+When motion is detected:
+- 30-second video clip recorded to ~/recordings/
+- File named motion_YYYYMMDD_HHMMSS.mp4
+- Dashboard updates with new recording
+- Storage section increments file count and used space
+
+Storage display updates:
+- Real-time via /api/storage endpoint
+- Shows Used GB, Available GB, Total GB, File Count
+- Progress bar shows usage percentage
+- Refresh page to see latest values
+
+Known limitations:
+- Motion detection sometimes times out because camera busy with streaming
+- This is normal - service retries automatically every 2 seconds
+- For pure motion recording (no streaming), improve performance significantly
+- Can configure motion_only=false to stream always
+
+====================================================
 11. READY FOR MAIN BRANCH
 --------------------------------------------
 Once tested:
