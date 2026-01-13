@@ -389,6 +389,22 @@ def settings():
                 if "camera" not in cfg:
                     cfg["camera"] = {}
                 cfg["camera"]["resolution"] = request.form.get("camera_resolution", "640x480")
+                cfg["camera"]["recording_resolution"] = request.form.get("recording_resolution", "1280x720")
+                cfg["camera"]["recording_duration"] = int(request.form.get("recording_duration", 30))
+                
+                # Device name
+                cfg["device_name"] = request.form.get("device_name", cfg.get("device_name", "ME_CAM_1"))
+                
+                # Detection settings
+                if "detection" not in cfg:
+                    cfg["detection"] = {}
+                cfg["detection"]["sensitivity"] = float(request.form.get("motion_sensitivity", 0.6))
+                
+                # Storage settings
+                if "storage" not in cfg:
+                    cfg["storage"] = {}
+                cfg["storage"]["motion_only"] = request.form.get("motion_recording_enabled") == "on"
+                cfg["storage"]["retention_days"] = int(request.form.get("storage_retention_days", 7))
                 
                 # Email
                 if "email" not in cfg:

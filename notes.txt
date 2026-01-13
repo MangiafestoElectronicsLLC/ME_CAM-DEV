@@ -662,5 +662,305 @@ source venv/bin/activate    (Activate VENV)
 python3 main.py       (RUN APP)
 
 --------------------------------------------
-END OF NOTES
+END OF ORIGINAL NOTES
 --------------------------------------------
+
+
+============================================
+🚨 EMERGENCY FEATURES & RECORDING SETUP
+============================================
+
+## 🎯 QUICK SETUP STEPS
+
+### 1. Deploy New Features to Pi
+```bash
+ssh pi@raspberrypi.local
+cd ~/ME_CAM-DEV
+git pull origin main
+sudo systemctl restart mecamera
+sudo systemctl status mecamera
+```
+
+### 2. Configure Emergency Contacts (in Web Dashboard)
+1. Open: http://raspberrypi.local:8080
+2. Login → Click "⚙️ Configure"
+3. Scroll to "🚨 Emergency Contacts" (red section)
+4. Fill in:
+   - Device Location: "Living Room", "Bedroom", etc.
+   - Primary Contact: Wife's phone SMS gateway
+   - Owner Email: Your email
+   - Emergency Mode: Medical/Security/Both
+
+### 3. SMS to Wife's Phone Setup
+**Carrier Email Gateways:**
+- Verizon: `5852274686@vtext.com`
+- AT&T: `5852274686@txt.att.net`
+- T-Mobile: `5852274686@tmomail.net`
+- Sprint: `5852274686@messaging.sprintpcs.com`
+
+Replace 5852274686 with actual 10-digit phone (no dashes/spaces)
+Enter in "Primary Emergency Contact" field
+
+### 4. Gmail App Password (Required for SMS/Email)
+1. Go to: https://myaccount.google.com/apppasswords
+2. Create "Mail" app password
+3. Copy 16-character password
+4. In Settings → Email Notifications:
+   - SMTP Server: smtp.gmail.com
+   - SMTP Port: 587
+   - Username: your-gmail@gmail.com
+   - Password: [paste app password]
+5. Save Settings
+
+### 5. Enable Motion Recording to SD Card
+In Settings → Camera & Recording:
+- ✓ Enable Motion Recording to SD Card
+- Recording Resolution: 1280x720 (HD)
+- Recording Duration: 30 seconds
+- Motion Sensitivity: Medium
+- Storage Retention: 7 days
+- Save Settings
+
+## 📹 HOW MOTION RECORDING WORKS
+
+- Runs every 2 seconds in background
+- Uses camera coordinator (no conflicts with streaming!)
+- When motion detected:
+  * Records video to SD card
+  * Saves to ~/ME_CAM-DEV/recordings/
+  * Filename: motion_YYYYMMDD_HHMMSS.mp4
+  * Continues if motion persists
+  * Stops 5 seconds after motion stops
+  * Logs file size on completion
+
+## 📊 VIEW RECORDINGS
+
+Dashboard → Recordings Section shows:
+- All saved videos with timestamps
+- File sizes
+- Download buttons
+- Delete buttons
+- Storage usage (Used/Available/Total GB)
+
+## 🚨 EMERGENCY ALERT TYPES
+
+### Medical (Seizure Detection)
+- Mode: Medical or Both
+- Triggers: Unusual motion patterns
+- Alerts: Primary Emergency Contact (wife)
+- Includes: Video evidence
+
+### Security (Theft/Break-in)
+- Mode: Security or Both
+- Triggers: Person detected when nobody home
+- Alerts: Owner + Security Contacts
+- Includes: Video for police/insurance
+
+### Manual SOS Button
+- Dashboard → "🚨 SOS Alert" button
+- Sends to Primary Emergency Contact
+- Includes latest video recording
+
+## ⚙️ NEW CONFIGURATION OPTIONS
+
+Added to Settings page:
+1. Device Name - Custom camera name
+2. Device Location - Physical location
+3. Recording Resolution - Separate from stream (HD quality)
+4. Recording Duration - 10-300 seconds
+5. Motion Sensitivity - High/Medium/Low
+6. Storage Retention - Auto-delete old files (1-365 days)
+7. Motion Recording Toggle - Enable/disable SD card recording
+8. Emergency Mode - Manual/Medical/Security/Both
+9. Multiple Contacts - Different alerts to different people
+
+Each Pi can have unique configuration saved in:
+~/ME_CAM-DEV/config/config.json
+
+## 🔧 CAMERA COORDINATOR (PREVENTS CONFLICTS)
+
+**Problem Solved:** Camera can only be used by ONE process
+**Solution:** Intelligent queue system
+
+How it works:
+- Streaming: High priority (always smooth)
+- Motion Detection: Normal priority (waits turn)
+- Recording: High priority (captures events)
+- 500ms delay between operations
+- Automatic retry if busy
+
+Verify working:
+```bash
+tail -f ~/ME_CAM-DEV/logs/mecam.log | grep CAMERA
+```
+Should see: "Access granted" and "Access released" messages
+NO "timeout" or "device busy" errors!
+
+## 🔍 MONITORING & VERIFICATION
+
+### Check Service Status
+```bash
+sudo systemctl status mecamera
+```
+Look for:
+- Active: active (running)
+- [MAIN] Motion detection service initialized
+- [MOTION] Motion detection service started
+
+### View Live Logs
+```bash
+# All logs
+tail -f ~/ME_CAM-DEV/logs/mecam.log
+
+# Motion only
+tail -f ~/ME_CAM-DEV/logs/mecam.log | grep MOTION
+
+# Camera coordination
+tail -f ~/ME_CAM-DEV/logs/mecam.log | grep CAMERA
+
+# Emergency alerts
+tail -f ~/ME_CAM-DEV/logs/mecam.log | grep EMERGENCY
+```
+
+### Test Motion Detection
+1. Wave hand in front of camera
+2. Check logs: [MOTION] Motion detected
+3. Wait 30 seconds
+4. Check: ls -lh ~/ME_CAM-DEV/recordings/
+5. Should see new .mp4 file
+
+### Test Emergency Alert
+1. Configure contacts & email
+2. Click SOS button
+3. Check wife's phone (1-2 minutes)
+
+## 🔄 DEPLOYMENT COMMANDS
+
+### One Command Update (from your PC)
+```powershell
+ssh pi@raspberrypi.local "cd ~/ME_CAM-DEV && git pull origin main && sudo systemctl restart mecamera && sleep 3 && sudo systemctl status mecamera"
+```
+
+### Manual Deployment (from Pi)
+```bash
+ssh pi@raspberrypi.local
+cd ~/ME_CAM-DEV
+git pull origin main
+sudo systemctl restart mecamera
+sudo systemctl status mecamera
+```
+
+## ✅ VERIFICATION CHECKLIST
+
+After deployment verify:
+- [ ] Camera streaming works (no black screen)
+- [ ] Motion detection started (check logs)
+- [ ] Camera coordinator working (check logs)
+- [ ] Emergency contacts configured
+- [ ] Email configured (Gmail App Password)
+- [ ] Test SOS → Wife receives alert
+- [ ] Motion recording enabled
+- [ ] Wave hand → Recording created
+- [ ] Recordings on dashboard
+- [ ] Storage shows space used
+- [ ] No camera busy errors
+- [ ] Auto-starts on reboot
+
+## 🆘 TROUBLESHOOTING
+
+### Motion Not Recording
+```bash
+# Check enabled
+grep "motion_only" ~/ME_CAM-DEV/config/config.json
+# Should be true
+
+# Check directory
+ls -la ~/ME_CAM-DEV/recordings/
+
+# Fix permissions
+chmod -R 755 ~/ME_CAM-DEV/recordings/
+
+# Check space
+df -h
+
+# Restart
+sudo systemctl restart mecamera
+```
+
+### Emergency Alerts Not Sending
+1. Verify email enabled in settings
+2. Must use Gmail App Password (not regular password)
+3. Test carrier SMS gateway correct
+4. Check first message not in spam
+5. Try email instead of SMS gateway
+
+### Camera Conflicts (should NOT happen)
+```bash
+# Verify coordinator being used
+grep "camera_coordinator" ~/ME_CAM-DEV/libcamera_streamer.py
+
+# Check no other camera processes
+ps aux | grep libcamera
+# Only mecamera service should be listed
+
+# Restart service
+sudo systemctl restart mecamera
+```
+
+### Wife Not Receiving SMS
+Common fixes:
+1. Wrong carrier gateway
+2. Wrong phone number format (must be 10 digits)
+3. Gmail blocking (use App Password)
+4. First message in spam
+5. Use email: wife@example.com instead
+
+## 📞 QUICK REFERENCE
+
+### URLs
+- Dashboard: http://raspberrypi.local:8080
+- Settings: http://raspberrypi.local:8080/config
+
+### Directories
+- Project: ~/ME_CAM-DEV
+- Recordings: ~/ME_CAM-DEV/recordings/
+- Config: ~/ME_CAM-DEV/config/config.json
+- Logs: ~/ME_CAM-DEV/logs/mecam.log
+
+### Commands
+```bash
+# Service
+sudo systemctl status mecamera
+sudo systemctl restart mecamera
+
+# Logs
+tail -f ~/ME_CAM-DEV/logs/mecam.log
+
+# Update
+cd ~/ME_CAM-DEV && git pull origin main
+
+# Recordings
+ls -lh ~/ME_CAM-DEV/recordings/
+
+# Test camera
+libcamera-still --list-cameras
+```
+
+## 🎓 COMPLETE SETUP CHECKLIST
+
+1. [ ] Deploy code: git pull origin main
+2. [ ] Restart service: sudo systemctl restart mecamera
+3. [ ] Configure emergency contacts (wife's SMS gateway)
+4. [ ] Setup Gmail App Password
+5. [ ] Test SOS button → Verify wife gets alert
+6. [ ] Enable motion recording in settings
+7. [ ] Test motion → Wave hand, check recordings
+8. [ ] Set emergency mode (Medical/Security/Both)
+9. [ ] Monitor 24 hours → Check logs work
+10. [ ] Adjust sensitivity if needed
+
+--------------------------------------------
+🎉 YOUR ME_CAM IS NOW A COMPLETE EMERGENCY 
+   MONITORING & RECORDING SYSTEM! 🚨📹
+--------------------------------------------
+

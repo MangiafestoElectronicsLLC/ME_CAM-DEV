@@ -11,7 +11,9 @@
   "wifi_enabled": false,
   "bluetooth_enabled": false,
   "camera": {
-    "resolution": "640x480"
+    "resolution": "640x480",
+    "recording_resolution": "1280x720",
+    "recording_duration": 30
   },
   "email": {
     "enabled": false,

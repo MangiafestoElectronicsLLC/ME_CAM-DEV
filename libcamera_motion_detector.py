@@ -28,6 +28,7 @@ class LibcameraMotionDetector:
         self.motion_start_time = None
         self.is_recording = False
         self.recording_process = None
+        self.current_recording_file = None
         self.lock = Lock()
         
     def capture_frame(self):
@@ -86,7 +87,7 @@ class LibcameraMotionDetector:
         return motion_detected
     
     def start_recording(self):
-        """Start video recording using libcamera-vid"""
+        """Start video recording using libcamera-vid with camera coordinator"""
         with self.lock:
             if self.is_recording:
                 return
@@ -94,27 +95,34 @@ class LibcameraMotionDetector:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             output_file = os.path.join(self.recordings_dir, f"motion_{timestamp}.mp4")
             
-            cmd = [
-                "libcamera-vid",
-                "-t", "30000",  # 30 seconds max
-                "--width", "1280",
-                "--height", "720",
-                "-o", output_file,
-                "--nopreview",
-                "--codec", "h264"
-            ]
-            
-            try:
-                self.recording_process = subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
-                )
-                self.is_recording = True
-                self.motion_start_time = time.time()
-                logger.info(f"[MOTION] Recording started: {output_file}")
-            except Exception as e:
-                logger.error(f"[MOTION] Failed to start recording: {e}")
+            # Use camera coordinator to request exclusive access for recording
+            with camera_coordinator.access(user="motion_recording", priority="high") as granted:
+                if not granted:
+                    logger.warning("[MOTION] Cannot start recording - camera busy")
+                    return
+                
+                cmd = [
+                    "libcamera-vid",
+                    "-t", "30000",  # 30 seconds max
+                    "--width", "1280",
+                    "--height", "720",
+                    "-o", output_file,
+                    "--nopreview",
+                    "--codec", "h264"
+                ]
+                
+                try:
+                    self.recording_process = subprocess.Popen(
+                        cmd,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL
+                    )
+                    self.is_recording = True
+                    self.motion_start_time = time.time()
+                    self.current_recording_file = output_file
+                    logger.info(f"[MOTION] Recording started: {output_file}")
+                except Exception as e:
+                    logger.error(f"[MOTION] Failed to start recording: {e}")
     
     def stop_recording(self):
         """Stop current recording"""
@@ -125,13 +133,21 @@ class LibcameraMotionDetector:
             try:
                 if self.recording_process:
                     self.recording_process.terminate()
-                    self.recording_process.wait(timeout=5)
-                    logger.info("[MOTION] Recording stopped")
+                    
+                    # Verify file was saved
+                    if self.current_recording_file and os.path.exists(self.current_recording_file):
+                        file_size = os.path.getsize(self.current_recording_file) / (1024 * 1024)  # MB
+                        logger.info(f"[MOTION] Recording saved: {self.current_recording_file} ({file_size:.2f} MB)")
+                    else:
+                        logger.warning(f"[MOTION] Recording file not found: {self.current_recording_file}")
+                        
             except Exception as e:
                 logger.error(f"[MOTION] Error stopping recording: {e}")
             finally:
                 self.is_recording = False
                 self.recording_process = None
+                self.motion_start_time = None
+                self.current_recording_fils = None
                 self.motion_start_time = None
     
     def check_and_record(self):
