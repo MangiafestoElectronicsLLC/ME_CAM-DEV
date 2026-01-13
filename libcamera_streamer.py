@@ -20,16 +20,18 @@ class LibcameraStreamer:
                 "--height", str(height),
                 "-o", output_path,
                 "--nopreview",
-                "-t", "1"  # Minimal timeout
+                "--immediate",  # Capture immediately without preview
+                "-t", "100"  # 100ms timeout for capture
             ]
             
-            result = subprocess.run(cmd, capture_output=True, timeout=5)
+            result = subprocess.run(cmd, capture_output=True, timeout=5, stderr=subprocess.DEVNULL)
             if result.returncode == 0 and os.path.exists(output_path):
                 with open(output_path, 'rb') as f:
                     jpeg_data = f.read()
                 return jpeg_data
             else:
-                logger.warning(f"[CAMERA] libcamera-still failed: {result.stderr.decode()}")
+                if result.stderr:
+                    logger.warning(f"[CAMERA] libcamera-still failed: {result.stderr.decode()}")
                 return None
         except subprocess.TimeoutExpired:
             logger.warning("[CAMERA] libcamera-still timeout (increase timeout or check camera)")
