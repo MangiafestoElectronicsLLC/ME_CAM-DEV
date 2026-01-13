@@ -211,7 +211,7 @@
         <h2>Email Notifications (Optional)</h2>
         <div class="form-group">
           <label>
-            <input type="checkbox" name="email_enabled" {% if config.email.enabled %}checked{% endif %}>
+            <input type="checkbox" name="email_enabled" {% if config.get('email', {}).get('enabled', False) %}checked{% endif %}>
             Enable Email Alerts
           </label>
         </div>
@@ -226,13 +226,13 @@
         <h2>Google Drive Backup (Optional)</h2>
         <div class="form-group">
           <label>
-            <input type="checkbox" name="gdrive_enabled" {% if config.google_drive.enabled %}checked{% endif %}>
+            <input type="checkbox" name="gdrive_enabled" {% if config.get('google_drive', {}).get('enabled', False) %}checked{% endif %}>
             Enable Google Drive Backup
           </label>
         </div>
         <div class="form-group">
           <label>Google Drive Folder ID:</label>
-          <input type="text" name="gdrive_folder_id" value="{{ config.google_drive.get('folder_id', '') }}"
+          <input type="text" name="gdrive_folder_id" value="{{ config.get('google_drive', {}).get('folder_id', '') }}"
             placeholder="Leave blank to skip">
           <small style="color: #999;">Get this from sharing a folder on Google Drive</small>
         </div>
