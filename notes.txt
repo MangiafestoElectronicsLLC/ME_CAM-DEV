@@ -964,3 +964,963 @@ libcamera-still --list-cameras
    MONITORING & RECORDING SYSTEM! 🚨📹
 --------------------------------------------
 
+
+============================================
+📱 EMERGENCY SMS SETUP GUIDE
+============================================
+
+## Quick Emergency SMS Setup
+
+### Step 1: Determine Your Carrier
+You need to know the phone carrier to use email-to-SMS gateway.
+
+### Step 2: Configure Email in ME_CAM
+
+1. **Go to web dashboard:** `http://raspberrypi.local:8080`
+2. **Login** with your credentials
+3. **Go to Config/Settings**
+4. **Enable Email** and enter:
+
+#### If using Gmail:
+```
+SMTP Server: smtp.gmail.com
+SMTP Port: 587
+Username: your-gmail@gmail.com
+Password: [App Password - see below]
+From Address: your-gmail@gmail.com
+To Address: [carrier-gateway-below]
+```
+
+#### Carrier SMS Gateways (replace phone with actual 10-digit number):
+- **Verizon:** `5852274686@vtext.com`
+- **AT&T:** `5852274686@txt.att.net`
+- **T-Mobile:** `5852274686@tmomail.net`
+- **Sprint:** `5852274686@messaging.sprintpcs.com`
+- **US Cellular:** `5852274686@email.uscc.net`
+
+### Step 3: Get Gmail App Password
+
+1. Go to: https://myaccount.google.com/apppasswords
+2. Sign in to your Gmail account
+3. Create app password for "Mail"
+4. Copy the 16-character password
+5. Use this password (NOT your regular Gmail password)
+
+### Step 4: Test Configuration
+
+Run on your Pi:
+```bash
+cd ~/ME_CAM-DEV
+source venv/bin/activate
+
+python3 << 'EOF'
+from cloud.email_notifier import EmailNotifier
+
+# Replace with YOUR values:
+notifier = EmailNotifier(
+    enabled=True,
+    smtp_host='smtp.gmail.com',
+    smtp_port=587,
+    username='your-email@gmail.com',
+    password='your-app-password',
+    from_addr='your-email@gmail.com',
+    to_addr='5852274686@vtext.com'  # Change vtext.com to YOUR carrier
+)
+
+notifier.send_alert(
+    "TEST - ME_CAM Emergency",
+    "This is a test message. If you receive this, emergency alerts are working!"
+)
+print("Test message sent!")
+EOF
+```
+
+### Troubleshooting
+
+**Not receiving messages?**
+
+1. **Check spam folder** - first message might go to spam
+2. **Verify carrier gateway** - wrong gateway = no message
+3. **Check Gmail app password** - must use app password, not regular password
+4. **Check phone number format** - must be 10 digits, no dashes/spaces: `5852274686`
+
+**Gmail Security Error?**
+
+Enable "Less secure app access" or use App Passwords:
+https://support.google.com/accounts/answer/185833
+
+**Still not working?**
+
+Use a free SMS API service:
+- Twilio (free trial): https://www.twilio.com
+- SendGrid SMS
+- AWS SNS
+
+Or just use email - most reliable option.
+
+
+============================================
+🚨 COMPLETE EMERGENCY FEATURES GUIDE
+============================================
+
+## Overview
+
+ME_CAM now includes comprehensive emergency notification features for both **medical monitoring** (seizure detection, falls) and **security alerts** (theft, break-ins). The system uses AI-enhanced motion detection with intelligent camera coordination to prevent conflicts between live streaming and recording.
+
+---
+
+## 🚨 Emergency Modes
+
+### 1. **Manual Mode** (Default)
+- Emergency alerts only when you press the SOS button
+- No automatic detection
+- Safest option for testing
+
+### 2. **Medical Monitoring Mode**
+- AI detects unusual motion patterns (seizures, falls, prolonged inactivity)
+- Automatically alerts your wife/family
+- Includes video evidence of the event
+
+### 3. **Security Mode**
+- Detects intrusions, break-ins, theft
+- Sends alerts with video to property owner
+- Can forward to police and insurance companies
+
+### 4. **Both Medical & Security**
+- Combined monitoring
+- Different alert recipients for different event types
+
+---
+
+## 📋 Setup Instructions
+
+### Step 1: Update Your Pi
+
+```bash
+ssh pi@raspberrypi.local
+cd ~/ME_CAM-DEV
+git pull origin main
+```
+
+### Step 2: Restart the Service
+
+```bash
+sudo systemctl restart mecamera
+sudo systemctl status mecamera
+```
+
+---
+
+## ⚙️ Configuration
+
+### Access Settings Page
+
+1. Open browser: `http://raspberrypi.local:8080`
+2. Login with your credentials
+3. Click **⚙️ Configure** at bottom of dashboard
+4. Scroll to **🚨 Emergency Contacts** section (red border)
+
+### Emergency Contacts Configuration
+
+#### **Device Location**
+- Enter physical location: "Living Room", "Front Door", "Bedroom", etc.
+- This is included in all emergency alerts
+
+#### **Primary Emergency Contact (Medical)**
+- For medical emergencies (seizures, falls, unresponsive)
+- Enter phone number using carrier SMS gateway OR email
+- **SMS Examples:**
+  - Verizon: `5852274686@vtext.com`
+  - AT&T: `5852274686@txt.att.net`
+  - T-Mobile: `5852274686@tmomail.net`
+  - Sprint: `5852274686@messaging.sprintpcs.com`
+  
+  *(Replace `5852274686` with wife's phone number, no dashes or spaces)*
+
+- **Email Example:** `wife@example.com`
+
+#### **Property Owner Email (Security)**
+- For security alerts (theft, break-in)
+- Enter your email address
+- Receives video evidence automatically
+
+#### **Additional Security Contacts**
+- Comma-separated list
+- Police department email: `police@dept.gov`
+- Insurance company: `claims@insurance.com`
+
+#### **Emergency Detection Mode**
+- **Manual**: SOS button only (safest for testing)
+- **Medical**: Automatic medical alerts
+- **Security**: Automatic intrusion alerts
+- **Both**: All alerts enabled
+
+---
+
+## 📧 Email Configuration
+
+Emergency alerts require email to be configured. This works for both email and SMS (via carrier gateways).
+
+### Gmail Setup (Recommended)
+
+1. Go to Settings → **📧 Email Notifications**
+2. Check **Enable Email Alerts**
+3. Enter:
+   - **SMTP Server**: `smtp.gmail.com`
+   - **SMTP Port**: `587`
+   - **Username**: `your-gmail@gmail.com`
+   - **Password**: **[See below for App Password]**
+   - **From Address**: `your-gmail@gmail.com`
+   - **To Address**: `your-email@gmail.com` (or leave blank, will use emergency contacts)
+
+### Getting Gmail App Password
+
+**IMPORTANT**: You CANNOT use your regular Gmail password. You must create an "App Password":
+
+1. Go to: https://myaccount.google.com/apppasswords
+2. Sign in to your Gmail account
+3. Select **Mail** as the app
+4. Select **Other** as the device, name it "ME_CAM"
+5. Click **Generate**
+6. Copy the 16-character password (no spaces)
+7. Paste this into the ME_CAM password field
+
+### Testing Email
+
+After configuring email:
+1. Save settings
+2. Go to dashboard
+3. Click **🚨 SOS Alert** button
+4. Check your phone/email for the alert
+
+---
+
+## 🎯 How Emergency Alerts Work
+
+### Manual SOS Button
+
+**Location**: Dashboard → **Quick Actions** → Red **🚨 SOS Alert** button
+
+**What happens:**
+1. You press the button
+2. System finds most recent video recording
+3. Sends emergency alert email to Primary Emergency Contact
+4. Includes video attachment (if available)
+5. Email contains:
+   - Device name and location
+   - Timestamp
+   - Emergency contact info
+   - Video evidence link
+
+### Automatic Medical Alerts
+
+**When enabled** (Emergency Mode = Medical or Both):
+
+1. Motion detection runs in background
+2. AI analyzes motion patterns
+3. Detects:
+   - Sudden falls (rapid downward motion)
+   - Seizure-like movements (rapid repetitive motion)
+   - Prolonged stillness after activity
+4. Triggers medical emergency alert
+5. Sends to **Primary Emergency Contact** (your wife)
+6. Includes 30-second video clip of the event
+
+**Alert Format:**
+```
+Subject: 🚨 MEDICAL EMERGENCY - SEIZURE
+
+URGENT - MEDICAL EMERGENCY DETECTED
+
+Event Type: SEIZURE
+Device: Living Room Camera
+Location: Living Room
+Time: 2026-01-13 18:45:32
+
+Primary Contact: +1-555-0123
+
+This is an automated alert from ME_CAM monitoring system.
+Please check on the person immediately.
+
+Video evidence: Attached
+```
+
+### Automatic Security Alerts
+
+**When enabled** (Emergency Mode = Security or Both):
+
+1. Motion detection runs in background
+2. AI detects person in frame (not just motion)
+3. If person detected when nobody should be home:
+4. Triggers security alert
+5. Sends to **Owner Email** and **Security Contacts**
+6. Includes video evidence for police report
+
+**Alert Format:**
+```
+Subject: 🚨 SECURITY ALERT - THEFT
+
+SECURITY INCIDENT DETECTED
+
+Incident Type: THEFT
+Device: Front Door Camera
+Location: Front Door
+Time: 2026-01-13 02:15:44
+
+Video Evidence: Attached
+
+This alert has been sent to:
+- Property Owner: owner@example.com
+- Security Contacts: police@dept.gov, insurance@company.com
+
+For police report, reference:
+- Device ID: Front Door Camera
+- Timestamp: 2026-01-13T02:15:44
+- Evidence File: motion_20260113_021544.mp4
+```
+
+---
+
+## 🔧 Technical Details
+
+### Camera Coordination
+
+**Problem Solved**: Camera streaming and motion detection conflicted because libcamera can only be accessed by one process at a time.
+
+**Solution**: New `camera_coordinator.py` module:
+- Manages queue for camera access
+- Streaming gets **high priority** (always works)
+- Motion detection gets **normal priority** (waits for streaming to finish)
+- Minimum 500ms delay between camera operations
+- Prevents device busy errors
+
+**Result**:
+- ✅ Live camera streaming works smoothly
+- ✅ Motion detection runs every 2-5 seconds
+- ✅ No more camera lock conflicts
+- ✅ Both features can run simultaneously
+
+### Motion Detection Behavior
+
+- Runs in background thread
+- Checks every 2 seconds
+- When motion detected:
+  - Starts 30-second recording
+  - Continues recording if motion persists
+  - Stops 5 seconds after motion stops
+- Saves to `~/ME_CAM-DEV/recordings/`
+- Filename: `motion_YYYYMMDD_HHMMSS.mp4`
+
+### Emergency Handler
+
+New `emergency_handler.py` module provides:
+- **Cooldown**: 60 seconds between alerts (prevents spam)
+- **Video attachment**: Always includes latest recording
+- **Google Drive upload**: If enabled, uploads evidence
+- **Multiple recipients**: Can send to multiple contacts
+- **Event types**: Medical (seizure, fall) and Security (theft, break-in)
+
+---
+
+## 📱 SMS Setup for Wife's Phone
+
+### Carrier Gateway Examples
+
+**Example for Verizon:**
+```
+Primary Emergency Contact: 5852274686@vtext.com
+```
+
+**Example for AT&T:**
+```
+Primary Emergency Contact: 5852274686@txt.att.net
+```
+
+**Example for T-Mobile:**
+```
+Primary Emergency Contact: 5852274686@tmomail.net
+```
+
+**Example for Sprint:**
+```
+Primary Emergency Contact: 5852274686@messaging.sprintpcs.com
+```
+
+Replace `5852274686` with actual 10-digit phone number (no dashes/spaces).
+
+
+============================================
+📹 QUICK DEPLOYMENT & MOTION RECORDING GUIDE
+============================================
+
+## 🎯 QUICK SETUP STEPS
+
+### 1. Deploy New Features to Pi
+```bash
+ssh pi@raspberrypi.local
+cd ~/ME_CAM-DEV
+git pull origin main
+sudo systemctl restart mecamera
+sudo systemctl status mecamera
+```
+
+### 2. Configure Emergency Contacts
+1. Open browser: http://raspberrypi.local:8080
+2. Login with your credentials
+3. Click **⚙️ Configure** (bottom of dashboard)
+4. Scroll to **🚨 Emergency Contacts** section (red border)
+5. Fill in:
+   - **Device Location**: "Living Room", "Bedroom", etc.
+   - **Primary Emergency Contact**: Wife's phone (SMS via email gateway)
+   - **Owner Email**: Your email for security alerts
+   - **Emergency Mode**: Select Medical, Security, or Both
+
+### 3. Setup SMS to Wife's Phone
+To send text messages when emergency detected:
+
+**Get Phone Carrier Gateway:**
+- Verizon: `5852274686@vtext.com`
+- AT&T: `5852274686@txt.att.net`
+- T-Mobile: `5852274686@tmomail.net`
+- Sprint: `5852274686@messaging.sprintpcs.com`
+
+Replace `5852274686` with actual 10-digit phone number (no dashes/spaces)
+
+**Enter in Primary Emergency Contact field**
+
+### 4. Configure Email (Required for SMS)
+1. Go to Settings → Email Notifications
+2. Enable Email Alerts
+3. Enter Gmail info:
+   - SMTP Server: `smtp.gmail.com`
+   - SMTP Port: `587`
+   - Username: `your-gmail@gmail.com`
+   - Password: **[Use App Password - see below]**
+
+**Get Gmail App Password:**
+1. Go to: https://myaccount.google.com/apppasswords
+2. Create password for "Mail"
+3. Copy 16-character password
+4. Paste into ME_CAM settings
+
+### 5. Test Emergency Alert
+1. Save all settings
+2. Go to dashboard
+3. Click **🚨 SOS Alert** button
+4. Check wife's phone for text message
+
+---
+
+## 📹 MOTION RECORDING TO SD CARD
+
+### Enable Motion Recording
+1. Go to Settings → Camera & Recording Settings
+2. Check **Enable Motion Recording to SD Card**
+3. Configure:
+   - **Recording Resolution**: 1280x720 (HD recommended)
+   - **Recording Duration**: 30 seconds (or custom)
+   - **Motion Sensitivity**: Medium (recommended)
+   - **Storage Retention**: 7 days (auto-delete old recordings)
+4. Save Settings
+
+### How Motion Recording Works
+- Camera coordinator manages access (no conflicts with streaming)
+- Motion detection runs every 2 seconds in background
+- When motion detected:
+  * Records video to SD card
+  * Saves to `~/ME_CAM-DEV/recordings/`
+  * Filename: `motion_YYYYMMDD_HHMMSS.mp4`
+  * Continues recording if motion persists
+  * Stops 5 seconds after motion stops
+  * File size verification logged
+
+### View Recordings
+- Dashboard → Recordings section
+- Shows all saved videos with:
+  * Timestamp
+  * File size
+  * Download button
+  * Delete button
+- Storage usage displayed (Used/Available/Total)
+
+### Check Recording Status
+```bash
+# View motion detection logs
+tail -f ~/ME_CAM-DEV/logs/mecam.log | grep MOTION
+
+# Should see:
+# [MOTION] Recording started: recordings/motion_20260113_184532.mp4
+# [MOTION] Recording saved: recordings/motion_20260113_184532.mp4 (12.45 MB)
+```
+
+### Troubleshooting Recording Issues
+
+**Problem: Motion detected but no files saved**
+```bash
+# Check recordings directory exists
+ls -lh ~/ME_CAM-DEV/recordings/
+
+# Check disk space
+df -h
+
+# Check permissions
+chmod 755 ~/ME_CAM-DEV/recordings/
+
+# Check camera access
+libcamera-vid --list-cameras
+```
+
+**Problem: Files are 0 bytes or corrupted**
+- Check SD card health: `sudo fsck /dev/mmcblk0p2`
+- Check SD card not full: `df -h`
+- Reduce recording resolution in settings
+- Reduce recording duration
+
+**Problem: Camera busy errors**
+- Camera coordinator should prevent this
+- Check logs: `grep "camera busy" ~/ME_CAM-DEV/logs/mecam.log`
+- Verify motion service using coordinator
+- Restart service: `sudo systemctl restart mecamera`
+
+---
+
+## 🚨 EMERGENCY ALERT TYPES
+
+### Medical Emergency (Seizure Detection)
+**When:** Emergency Mode = Medical or Both
+**Triggers:** Unusual motion patterns detected
+**Alert Sent To:** Primary Emergency Contact (wife)
+**Includes:** Video evidence of event
+
+**Alert Format:**
+```
+Subject: 🚨 MEDICAL EMERGENCY - SEIZURE
+
+URGENT - MEDICAL EMERGENCY DETECTED
+
+Event Type: SEIZURE
+Device: Living Room Camera
+Location: Living Room
+Time: 2026-01-13 18:45:32
+Primary Contact: 5551234567@vtext.com
+
+Video evidence: Attached
+```
+
+### Security Alert (Theft/Break-in)
+**When:** Emergency Mode = Security or Both
+**Triggers:** Person detected when nobody home
+**Alert Sent To:** Owner email + Security contacts
+**Includes:** Video evidence for police/insurance
+
+**Alert Format:**
+```
+Subject: 🚨 SECURITY ALERT - THEFT
+
+SECURITY INCIDENT DETECTED
+
+Incident Type: THEFT
+Device: Front Door Camera  
+Location: Front Door
+Time: 2026-01-13 02:15:44
+
+Video Evidence: Attached
+Sent to: owner@example.com, police@dept.gov, insurance@company.com
+```
+
+### Manual SOS Button
+**When:** Anytime you press SOS button
+**Triggers:** Manual button press on dashboard
+**Alert Sent To:** Primary Emergency Contact
+**Includes:** Latest video recording (if available)
+
+---
+
+## ⚙️ ENHANCED CONFIGURATION OPTIONS
+
+### New Settings Added:
+1. **Device Name**: Custom name for camera (appears on dashboard/alerts)
+2. **Device Location**: Physical location (Living Room, Bedroom, etc.)
+3. **Recording Resolution**: Separate from stream resolution (HD quality)
+4. **Recording Duration**: 10-300 seconds configurable
+5. **Motion Sensitivity**: High/Medium/Low presets
+6. **Storage Retention**: Auto-delete old recordings (1-365 days)
+7. **Motion Recording Toggle**: Enable/disable recording to SD card
+8. **Emergency Mode**: Manual/Medical/Security/Both
+9. **Multiple Emergency Contacts**: Different contacts for different alerts
+
+### Per-Device Customization
+Each Raspberry Pi can have unique configuration:
+- Different device names
+- Different emergency contacts  
+- Different recording settings
+- Different sensitivity levels
+- Custom storage retention
+
+Configuration saved in: `~/ME_CAM-DEV/config/config.json`
+
+---
+
+## 🔧 CAMERA COORDINATOR EXPLAINED
+
+### Problem Solved
+Previously: Camera could only be used by ONE process at a time
+- Streaming OR Motion Detection (not both)
+- "Device busy" errors
+- Camera lock conflicts
+
+Now: Intelligent queue system allows both!
+
+### How It Works
+1. **Streaming**: High priority (always smooth)
+2. **Motion Detection**: Normal priority (waits turn)
+3. **Recording**: High priority (captures events)
+4. Minimum 500ms delay between operations
+5. Automatic retry if busy
+
+### Verify Coordination Working
+```bash
+# Check camera access logs
+tail -f ~/ME_CAM-DEV/logs/mecam.log | grep CAMERA
+
+# Should see:
+# [CAMERA] Access granted to streaming
+# [CAMERA] Access released by streaming
+# [CAMERA] Access granted to motion_detection
+# [CAMERA] Access released by motion_detection
+
+# NO "timeout" or "busy" errors!
+```
+
+---
+
+## 📊 MONITORING & VERIFICATION
+
+### Check Service Status
+```bash
+sudo systemctl status mecamera
+```
+Look for:
+- `Active: active (running)`
+- `[MAIN] Motion detection service initialized`
+- `[MOTION] Motion detection service started`
+
+### View Live Logs
+```bash
+# All logs
+tail -f ~/ME_CAM-DEV/logs/mecam.log
+
+# Motion detection only
+tail -f ~/ME_CAM-DEV/logs/mecam.log | grep MOTION
+
+# Camera coordination
+tail -f ~/ME_CAM-DEV/logs/mecam.log | grep CAMERA
+
+# Emergency alerts
+tail -f ~/ME_CAM-DEV/logs/mecam.log | grep EMERGENCY
+```
+
+### Test Motion Detection
+1. Wave hand in front of camera
+2. Check logs for: `[MOTION] Motion detected`
+3. Wait 30 seconds
+4. Check recordings directory: `ls -lh ~/ME_CAM-DEV/recordings/`
+5. Should see new .mp4 file with current timestamp
+
+### Test Emergency Alert
+1. Configure emergency contacts
+2. Enable email with Gmail App Password
+3. Click SOS button on dashboard
+4. Check wife's phone/email within 1-2 minutes
+
+---
+
+## 🔄 DEPLOYMENT COMMANDS
+
+### Quick Update (From PC)
+```powershell
+# One command to update Pi from your PC
+ssh pi@raspberrypi.local "cd ~/ME_CAM-DEV && git pull origin main && sudo systemctl restart mecamera && sleep 3 && sudo systemctl status mecamera"
+```
+
+### Manual Deployment (From Pi)
+```bash
+# SSH into Pi
+ssh pi@raspberrypi.local
+cd ~/ME_CAM-DEV
+git pull origin main
+sudo systemctl restart mecamera
+```
+
+---
+
+## ✅ VERIFICATION CHECKLIST
+
+After deployment verify:
+- [ ] Camera streaming works (no black screen)
+- [ ] Motion detection started (check logs)
+- [ ] Camera coordinator working (check logs)
+- [ ] Emergency contacts configured
+- [ ] Email configured (Gmail App Password)
+- [ ] Test SOS → Wife receives alert
+- [ ] Motion recording enabled
+- [ ] Wave hand → Recording created
+- [ ] Recordings on dashboard
+- [ ] Storage shows space used
+- [ ] No camera busy errors
+- [ ] Auto-starts on reboot
+
+---
+
+## 🆘 TROUBLESHOOTING
+
+### Motion Not Recording
+```bash
+# Check enabled
+grep "motion_only" ~/ME_CAM-DEV/config/config.json
+# Should be true
+
+# Check directory
+ls -la ~/ME_CAM-DEV/recordings/
+
+# Fix permissions
+chmod -R 755 ~/ME_CAM-DEV/recordings/
+
+# Check space
+df -h
+
+# Restart
+sudo systemctl restart mecamera
+```
+
+### Emergency Alerts Not Sending
+1. Verify email enabled in settings
+2. Must use Gmail App Password (not regular password)
+3. Test carrier SMS gateway correct
+4. Check first message not in spam
+5. Try email instead of SMS gateway
+
+### Camera Conflicts (should NOT happen)
+```bash
+# Verify coordinator being used
+grep "camera_coordinator" ~/ME_CAM-DEV/libcamera_streamer.py
+
+# Check no other camera processes
+ps aux | grep libcamera
+# Only mecamera service should be listed
+
+# Restart service
+sudo systemctl restart mecamera
+```
+
+### Wife Not Receiving SMS
+Common fixes:
+1. Wrong carrier gateway
+2. Wrong phone number format (must be 10 digits)
+3. Gmail blocking (use App Password)
+4. First message in spam
+5. Use email: wife@example.com instead
+
+
+============================================
+⚡ QUICK REFERENCE CARD
+============================================
+
+📍 DASHBOARD ACCESS
+  URL:          http://raspberrypi.local:8080
+  Login:        Your username/password
+  PIN (optional): Configurable in settings
+
+🎯 QUICK FEATURES
+  🚨 SOS Button:        Click "🚨 SOS Alert" for immediate emergency alert
+  📹 Recordings:        See all motion-triggered videos on dashboard
+  ⚙️  Settings:         Configure everything including emergency contacts
+  📊 Storage:           View SD card usage (used/available/total GB)
+
+🚨 EMERGENCY MODES
+
+  Medical Monitoring (Wife - Seizure Alert)
+  ├─ Mode: Medical or Both
+  ├─ Setup: Primary Contact = wife@sms.gateway (e.g., 5551234567@vtext.com)
+  ├─ Trigger: Unusual motion patterns detected automatically
+  └─ Alert: SMS to wife + video evidence
+
+  Security Mode (Police/Insurance - Theft Alert)
+  ├─ Mode: Security or Both
+  ├─ Setup: Owner Email + Security Contacts (comma-separated)
+  ├─ Trigger: Person detected when nobody home
+  └─ Alert: Email to police/insurance with video
+
+  Manual SOS Button
+  ├─ Mode: Any mode
+  ├─ Setup: Primary contact configured
+  ├─ Trigger: Click button anytime
+  └─ Alert: Immediate notification + latest video
+
+📱 SMS SETUP (Wife's Phone)
+  
+  Verizon:      5852274686@vtext.com
+  AT&T:         5852274686@txt.att.net
+  T-Mobile:     5852274686@tmomail.net
+  Sprint:       5852274686@messaging.sprintpcs.com
+  (Replace 5852274686 with wife's 10-digit number, no dashes/spaces)
+
+  ⚠️  REQUIRES Gmail App Password (not regular password)
+
+📧 EMAIL SETUP (Required for SMS/Alerts)
+
+  1. Go to:       https://myaccount.google.com/apppasswords
+  2. Create:      "Mail" app password
+  3. Copy:        16-character password
+  4. Enter in Settings → Email Notifications:
+     SMTP Server: smtp.gmail.com
+     SMTP Port:   587
+     Username:    your-gmail@gmail.com
+     Password:    [16-character app password]
+
+🎬 MOTION RECORDING SETTINGS
+
+  Recording Enabled:     ✓ Enable Motion Recording to SD Card
+  Resolution:            1280x720 (HD recommended)
+  Duration:              30 seconds (configurable 10-300)
+  Sensitivity:           Medium (High/Medium/Low)
+  Storage Retention:     7 days (auto-delete older files)
+  
+  Videos save to: ~/ME_CAM-DEV/recordings/
+  Filename format: motion_YYYYMMDD_HHMMSS.mp4
+
+🔧 SERVICE MANAGEMENT
+
+  Check Status:   sudo systemctl status mecamera
+  Start Service:  sudo systemctl start mecamera
+  Stop Service:   sudo systemctl stop mecamera
+  Restart:        sudo systemctl restart mecamera
+  View Logs:      tail -f ~/ME_CAM-DEV/logs/mecam.log
+
+📊 MONITORING COMMANDS
+
+  View All Logs:           tail -f ~/ME_CAM-DEV/logs/mecam.log
+  Motion Detection Only:   tail -f ~/ME_CAM-DEV/logs/mecam.log | grep MOTION
+  Camera Coordination:     tail -f ~/ME_CAM-DEV/logs/mecam.log | grep CAMERA
+  Emergency Alerts:        tail -f ~/ME_CAM-DEV/logs/mecam.log | grep EMERGENCY
+  
+  List Recordings:         ls -lh ~/ME_CAM-DEV/recordings/
+  Check Disk Space:        df -h
+  Camera Test:             libcamera-still --list-cameras
+
+🔄 DEPLOYMENT/UPDATE
+
+  From your PC:
+  $ ssh pi@raspberrypi.local "cd ~/ME_CAM-DEV && git pull origin main && \
+    sudo systemctl restart mecamera && sudo systemctl status mecamera"
+
+  From Pi directly:
+  $ cd ~/ME_CAM-DEV
+  $ git pull origin main
+  $ sudo systemctl restart mecamera
+
+✅ VERIFICATION STEPS
+
+  1. Dashboard loads at http://raspberrypi.local:8080 ?
+  2. Live camera feed displaying ?
+  3. Settings page has Emergency Contacts section ?
+  4. Motion recording checkbox enabled ?
+  5. Email configured with Gmail App Password ?
+  6. Emergency contacts filled in ?
+  7. Wave hand in front of camera - recording created ?
+  8. Click SOS button - wife/contact gets alert ?
+  9. No timeout/busy errors in logs ?
+  10. Service auto-starts on reboot ?
+
+🆘 TROUBLESHOOTING QUICK FIXES
+
+  Motion not recording?
+    $ grep "motion_only" ~/ME_CAM-DEV/config/config.json
+    Should show: "motion_only": true
+    $ sudo systemctl restart mecamera
+
+  No emergency alerts?
+    • Check Gmail App Password (not regular password!)
+    • Check emergency contacts configured
+    • Check email enabled in settings
+    • Try email instead of SMS gateway
+    • Test: Click SOS button, check logs
+
+  Camera not displaying?
+    $ libcamera-still --list-cameras
+    $ sudo systemctl restart mecamera
+
+  Motion timeouts?
+    This is normal! Streaming has priority.
+    System retries automatically every 2 seconds.
+
+📋 CONFIGURATION FILES
+
+  Config:      ~/ME_CAM-DEV/config/config.json
+  Logs:        ~/ME_CAM-DEV/logs/mecam.log
+  Recordings:  ~/ME_CAM-DEV/recordings/
+  Service:     /etc/systemd/system/mecamera.service
+
+🎓 RECOMMENDED SETUP ORDER
+
+  1. Deploy code (git pull + restart)
+  2. Configure emergency contacts
+  3. Setup Gmail App Password
+  4. Enable motion recording
+  5. Test SOS button
+  6. Test motion detection
+  7. Adjust sensitivity if needed
+  8. Enable Google Drive (optional)
+  9. Monitor logs for 24 hours
+  10. Verify all features working
+
+⚡ KEY SYSTEM IMPROVEMENTS
+
+  ✅ Camera Coordinator: Streaming + Motion Detection (no conflicts!)
+  ✅ Emergency Handler: Medical + Security alert types
+  ✅ Motion Recording: HD video to SD card with coordinator
+  ✅ Smart Settings: Configurable resolution/duration/sensitivity
+  ✅ Multiple Contacts: Different alerts for different situations
+  ✅ SMS Support: Via carrier email gateways
+  ✅ File Verification: Logs file size when recordings saved
+  ✅ Auto-Cleanup: Old files automatically deleted
+  ✅ Documentation: 1500+ lines of guides and examples
+
+🌟 WHAT YOU CAN NOW DO
+
+  Medical Monitoring:
+    → Wife gets SMS if seizure detected
+    → Video evidence automatically captured
+    → Medical professional can review activity
+
+  Security & Theft Prevention:
+    → Police/Insurance get email with video
+    → Timestamp and device info for reports
+    → Can prove who was there and when
+
+  Emergency Response:
+    → One-click SOS button anytime
+    → Immediate alert to contacts
+    → Latest video evidence attached
+
+  Motion Recording & Review:
+    → All events recorded locally
+    → View on dashboard with download button
+    → Auto-cleanup old files
+    → Optional cloud backup
+
+════════════════════════════════════════════════════════════════════════════════
+
+EMERGENCY? DON'T JUST RELY ON ME_CAM:
+  ⚠️  Keep backup emergency plan (medical alert device, 911)
+  ⚠️  Test alerts regularly (monthly SOS button test)
+  ⚠️  Monitor logs periodically
+  ⚠️  Verify wife receives SMS messages
+  ⚠️  Have alternative contact method if system fails
+
+════════════════════════════════════════════════════════════════════════════════
+Version: 2.0 (Emergency Features & Advanced Recording)
+Status: ✅ Production Ready
+Last Updated: January 13, 2026
+════════════════════════════════════════════════════════════════════════════════
+
