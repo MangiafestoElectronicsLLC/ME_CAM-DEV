@@ -5,6 +5,9 @@
   "emergency_phone": "+1-800-555-0123",
   "wifi_enabled": false,
   "bluetooth_enabled": false,
+  "camera": {
+    "resolution": "640x480"
+  },
   "email": {
     "enabled": false,
     "smtp_server": "",

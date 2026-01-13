@@ -10,20 +10,20 @@ class LibcameraStreamer:
         self.jpeg_dir = "/tmp/libcamera_frames"
         os.makedirs(self.jpeg_dir, exist_ok=True)
     
-    def get_single_frame_jpeg(self):
+    def get_single_frame_jpeg(self, width=640, height=480):
         """Capture single JPEG frame - more reliable than video streaming."""
         try:
             output_path = f"{self.jpeg_dir}/frame.jpg"
             cmd = [
                 "libcamera-still",
-                "--width", "640",
-                "--height", "480",
+                "--width", str(width),
+                "--height", str(height),
                 "-o", output_path,
                 "--nopreview",
-                "-t", "500"  # Timeout in ms
+                "-t", "1"  # Minimal timeout
             ]
             
-            result = subprocess.run(cmd, capture_output=True, timeout=3)
+            result = subprocess.run(cmd, capture_output=True, timeout=5)
             if result.returncode == 0 and os.path.exists(output_path):
                 with open(output_path, 'rb') as f:
                     jpeg_data = f.read()
@@ -32,7 +32,7 @@ class LibcameraStreamer:
                 logger.warning(f"[CAMERA] libcamera-still failed: {result.stderr.decode()}")
                 return None
         except subprocess.TimeoutExpired:
-            logger.warning("[CAMERA] libcamera-still timeout")
+            logger.warning("[CAMERA] libcamera-still timeout (increase timeout or check camera)")
             return None
         except Exception as e:
             logger.warning(f"[CAMERA] Frame capture error: {e}")

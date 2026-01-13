@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, session, jsonify, Response
+from flask import Flask, render_template, request, redirect, url_for, session, jsonify, Response, send_file
 from threading import Event
 from loguru import logger
 import os
@@ -22,8 +22,13 @@ from qr_generator import generate_setup_qr
 app = Flask(__name__, template_folder='templates', static_folder='static')
 app.secret_key = os.urandom(24)
 
-watchdog = CameraWatchdog()
-watchdog.start()
+# DISABLED: Camera pipeline conflicts with libcamera-still streaming
+# watchdog = CameraWatchdog()
+# watchdog.start()
+watchdog = None  # Disabled to allow libcamera streaming
+
+# Motion detection temporarily disabled for stability
+motion_service = None
 
 battery = BatteryMonitor(enabled=True)
 
@@ -200,7 +205,7 @@ def index():
     username = session.get("username", "User")
     try:
         cfg = get_config()
-        status = watchdog.status()
+        status = watchdog.status() if watchdog else {"active": False, "timestamp": time.time()}
         battery_status = battery.get_status()
         videos = get_recordings(cfg, limit=12)
         storage_used = get_storage_used_gb(cfg)
@@ -273,7 +278,7 @@ def logout():
 
 @app.route("/api/status")
 def api_status():
-    return jsonify(watchdog.status())
+    return jsonify(watchdog.status() if watchdog else {"active": False, "timestamp": time.time()})
 
 @app.route("/api/trigger_emergency", methods=["POST"])
 def trigger_emergency():
@@ -283,8 +288,27 @@ def trigger_emergency():
         
         logger.info(f"[EMERGENCY] Emergency triggered - Contact: {emergency_phone}")
         
-        # TODO: Implement actual emergency notification (SMS, email, etc.)
-        # For now, just log the event
+        # Send email notification if configured
+        email_cfg = cfg.get('email', {})
+        if email_cfg.get('enabled', False):
+            try:
+                from cloud.email_notifier import EmailNotifier
+                notifier = EmailNotifier(
+                    enabled=True,
+                    smtp_host=email_cfg.get('smtp_server', ''),
+                    smtp_port=email_cfg.get('smtp_port', 587),
+                    username=email_cfg.get('username', ''),
+                    password=email_cfg.get('password', ''),
+                    from_addr=email_cfg.get('from_address', ''),
+                    to_addr=email_cfg.get('to_address', '')
+                )
+                notifier.send_alert(
+                    "🚨 EMERGENCY ALERT - ME_CAM",
+                    f"Emergency button pressed!\\n\\nDevice: {cfg.get('device_name', 'ME_CAM')}\\nTime: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\\nEmergency Contact: {emergency_phone}\\n\\nPlease respond immediately."
+                )
+                logger.info("[EMERGENCY] Email notification sent")
+            except Exception as e:
+                logger.error(f"[EMERGENCY] Failed to send email: {e}")
         
         return jsonify({
             "ok": True,
@@ -312,6 +336,11 @@ def settings():
                 # Optional integrations
                 cfg["wifi_enabled"] = request.form.get("wifi_enabled") == "on"
                 cfg["bluetooth_enabled"] = request.form.get("bluetooth_enabled") == "on"
+                
+                # Camera settings
+                if "camera" not in cfg:
+                    cfg["camera"] = {}
+                cfg["camera"]["resolution"] = request.form.get("camera_resolution", "640x480")
                 
                 # Email
                 if "email" not in cfg:
@@ -352,6 +381,8 @@ def settings():
 
 def gen_mjpeg():
     """Generate MJPEG frames from camera using libcamera."""
+    import time  # Import at function start
+    
     if not camera_streamer:
         logger.warning("[STREAM] Camera streamer not available")
         yield b''
@@ -363,7 +394,12 @@ def gen_mjpeg():
     # Stream MJPEG with individual frames captured via libcamera-still
     while True:
         try:
-            jpeg_data = camera_streamer.get_single_frame_jpeg()
+            # Get resolution from config
+            cfg = get_config()
+            resolution = cfg.get('camera', {}).get('resolution', '640x480')
+            width, height = map(int, resolution.split('x'))
+            
+            jpeg_data = camera_streamer.get_single_frame_jpeg(width, height)
             
             if jpeg_data:
                 frame_count += 1
@@ -375,17 +411,14 @@ def gen_mjpeg():
                 yield jpeg_data
                 yield b'\r\n'
                 
-                # Small delay between frames to avoid overwhelming CPU
-                import time
-                time.sleep(0.1)
+                # Longer delay for Pi Zero 2 W (2-3 FPS)
+                time.sleep(0.5)
             else:
                 logger.debug("[STREAM] Failed to capture frame, retrying...")
-                import time
-                time.sleep(0.5)
+                time.sleep(1.0)
                 
         except Exception as e:
             logger.error(f"[STREAM] Frame generation error: {e}")
-            import time
             time.sleep(1)
 
 @app.route("/api/stream")
@@ -398,6 +431,162 @@ def stream():
         return jsonify({"error": "Camera not available"}), 503
     
     return Response(gen_mjpeg(), mimetype='multipart/x-mixed-replace; boundary=MJPEGBOUNDARY')
+
+@app.route("/api/recordings")
+def api_recordings():
+    """Get list of recordings with details."""
+    if not require_auth():
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    try:
+        cfg = get_config()
+        rec_path = _recordings_path(cfg)
+        recordings = []
+        
+        if os.path.isdir(rec_path):
+            for name in sorted(os.listdir(rec_path), reverse=True):
+                if name.lower().endswith((".mp4", ".mov", ".avi", ".mkv")):
+                    full_path = os.path.join(rec_path, name)
+                    try:
+                        size_mb = os.path.getsize(full_path) / (1024 * 1024)
+                        ts = os.path.getmtime(full_path)
+                        date_str = datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S")
+                        recordings.append({
+                            "name": name,
+                            "size_mb": round(size_mb, 2),
+                            "date": date_str,
+                            "timestamp": ts
+                        })
+                    except Exception as e:
+                        logger.warning(f"[RECORDINGS] Error reading file {name}: {e}")
+        
+        return jsonify({
+            "ok": True,
+            "count": len(recordings),
+            "storage_used_gb": get_storage_used_gb(cfg),
+            "recordings": recordings
+        })
+    except Exception as e:
+        logger.error(f"[RECORDINGS] Error: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/storage")
+def api_storage():
+    """Get storage information."""
+    if not require_auth():
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    try:
+        cfg = get_config()
+        rec_path = _recordings_path(cfg)
+        total_bytes = 0
+        file_count = 0
+        
+        if os.path.isdir(rec_path):
+            for root, _, files in os.walk(rec_path):
+                for f in files:
+                    try:
+                        total_bytes += os.path.getsize(os.path.join(root, f))
+                        file_count += 1
+                    except Exception:
+                        pass
+        
+        # Get available space
+        try:
+            import shutil
+            disk_usage = shutil.disk_usage(rec_path)
+            available_gb = disk_usage.free / (1024 ** 3)
+            total_gb = disk_usage.total / (1024 ** 3)
+        except Exception:
+            available_gb = 0
+            total_gb = 0
+        
+        return jsonify({
+            "ok": True,
+            "used_gb": round(total_bytes / (1024 ** 3), 2),
+            "available_gb": round(available_gb, 2),
+            "total_gb": round(total_gb, 2),
+            "file_count": file_count
+        })
+    except Exception as e:
+        logger.error(f"[STORAGE] Error: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/download/<filename>")
+def download_recording(filename):
+    """Download a recording file."""
+    if not require_auth():
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    try:
+        cfg = get_config()
+        rec_path = _recordings_path(cfg)
+        file_path = os.path.join(rec_path, filename)
+        
+        # Security: ensure file is in recordings directory
+        if not os.path.abspath(file_path).startswith(os.path.abspath(rec_path)):
+            return jsonify({"error": "Invalid file path"}), 400
+        
+        if not os.path.exists(file_path):
+            return jsonify({"error": "File not found"}), 404
+        
+        logger.info(f"[DOWNLOAD] User downloading {filename}")
+        return send_file(file_path, as_attachment=True, download_name=filename)
+    except Exception as e:
+        logger.error(f"[DOWNLOAD] Error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/delete/<filename>", methods=["POST"])
+def delete_recording(filename):
+    """Delete a recording file."""
+    if not require_auth():
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    try:
+        cfg = get_config()
+        rec_path = _recordings_path(cfg)
+        file_path = os.path.join(rec_path, filename)
+        
+        # Security: ensure file is in recordings directory
+        if not os.path.abspath(file_path).startswith(os.path.abspath(rec_path)):
+            return jsonify({"ok": False, "error": "Invalid file path"}), 400
+        
+        if not os.path.exists(file_path):
+            return jsonify({"ok": False, "error": "File not found"}), 404
+        
+        os.remove(file_path)
+        logger.info(f"[RECORDINGS] Deleted {filename}")
+        
+        return jsonify({"ok": True, "message": f"Deleted {filename}"})
+    except Exception as e:
+        logger.error(f"[DELETE] Error: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/clear-storage", methods=["POST"])
+def clear_storage():
+    """Delete all recordings (with confirmation)."""
+    if not require_auth():
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    try:
+        cfg = get_config()
+        rec_path = _recordings_path(cfg)
+        deleted_count = 0
+        
+        if os.path.isdir(rec_path):
+            for filename in os.listdir(rec_path):
+                if filename.lower().endswith((".mp4", ".mov", ".avi", ".mkv")):
+                    try:
+                        os.remove(os.path.join(rec_path, filename))
+                        deleted_count += 1
+                    except Exception as e:
+                        logger.warning(f"[STORAGE] Failed to delete {filename}: {e}")
+        
+        logger.info(f"[STORAGE] Cleared {deleted_count} files")
+        return jsonify({"ok": True, "deleted": deleted_count})
+    except Exception as e:
+        logger.error(f"[STORAGE] Clear error: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080, debug=False)

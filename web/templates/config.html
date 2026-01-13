@@ -167,6 +167,28 @@
                 <p class="help-text">Enable Bluetooth pairing for remote control</p>
             </div>
 
+            <!-- Camera Settings Section -->
+            <div class="settings-section">
+                <h3>📹 Camera Settings</h3>
+
+                <div class="form-group">
+                    <label for="camera_resolution">Stream Resolution</label>
+                    <select id="camera_resolution" name="camera_resolution"
+                        style="width: 100%; padding: 8px 12px; background: #0f0f0f; border: 1px solid #444; border-radius: 6px; color: #e0e0e0;">
+                        <option value="320x240" {% if config.get('camera', {}).get('resolution')=='320x240' %}selected{%
+                            endif %}>320x240 (Fastest - Low Quality)</option>
+                        <option value="640x480" {% if config.get('camera', {}).get('resolution', '640x480' )=='640x480'
+                            %}selected{% endif %}>640x480 (Recommended for Pi Zero 2 W)</option>
+                        <option value="1280x720" {% if config.get('camera', {}).get('resolution')=='1280x720'
+                            %}selected{% endif %}>1280x720 (HD - Slower)</option>
+                        <option value="1536x864" {% if config.get('camera', {}).get('resolution')=='1536x864'
+                            %}selected{% endif %}>1536x864 (High Quality - May Lag)</option>
+                    </select>
+                    <p class="help-text">Lower resolution = faster, smoother stream. Higher = better quality but may lag
+                        on Pi Zero 2 W.</p>
+                </div>
+            </div>
+
             <!-- Email Notifications Section -->
             <div class="settings-section">
                 <h3>📧 Email Notifications</h3>
