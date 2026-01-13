@@ -294,18 +294,37 @@ You will see the FIRST RUN SETUP WIZARD.
 - System monitors motion detection in background
 
 --------------------------------------------
-9. ENABLE AUTO-BOOT
+9. ENABLE AUTO-BOOT ON STARTUP
 --------------------------------------------
+After the first manual run is successful, enable auto-boot so ME_CAM starts
+automatically whenever the Pi boots up (no SSH or manual start needed).
+
+On your Pi, run:
+
 sudo cp etc/systemd/system/mecamera.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable mecamera
 sudo systemctl start mecamera
 
-Check status:
+Verify it's running:
 sudo systemctl status mecamera
 
-View logs:
+View logs in real-time:
 sudo journalctl -u mecamera.service -f
+
+From now on, the system will:
+- Start ME_CAM automatically on Pi boot
+- Restart the service if it crashes
+- Be accessible at http://raspberrypi.local:8080
+
+To disable auto-boot (if needed):
+sudo systemctl disable mecamera
+
+To manually stop the service:
+sudo systemctl stop mecamera
+
+To manually restart the service:
+sudo systemctl restart mecamera
 
 --------------------------------------------
 10. TROUBLESHOOTING
