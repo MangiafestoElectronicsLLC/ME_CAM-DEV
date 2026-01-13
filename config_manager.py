@@ -43,6 +43,24 @@ def get_config():
                 # Merge user config with defaults (adds missing keys from defaults)
                 _config_cache = _merge_configs(user_config, default)
                 
+        return _config_cache
+
+
+def save_config(new_config: dict):
+    global _config_cache
+    with _lock:
+        os.makedirs("config", exist_ok=True)
+        with open(CONFIG_PATH, "w") as f:
+            json.dump(new_config, f, indent=2)
+        _config_cache = new_config
+
+
+def update_config(updates: dict):
+    cfg = get_config()
+    cfg.update(updates)
+    save_config(cfg)
+
+
 def is_first_run():
     cfg = get_config()
     return not cfg.get("first_run_completed", False)
