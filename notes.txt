@@ -1,0 +1,498 @@
+ME CAMERA – PI ZERO 2 W COMPLETE SETUP GUIDE
+============================================
+
+This guide walks from a blank SD card → fully running ME Camera with auto-boot.
+
+--------------------------------------------
+1. FLASH RASPBERRY PI OS (LEGACY) BULLSEYE
+--------------------------------------------
+Use Raspberry Pi Imager:
+
+Choose OS →
+  Raspberry Pi OS (Other) →
+    Raspberry Pi OS (Legacy) →
+      Raspberry Pi OS Lite (Legacy)
+
+Enable:
+- SSH
+- Wi-Fi
+- Username/password
+
+Flash SD card and boot Pi.
+
+--------------------------------------------
+2. CONNECT TO THE PI
+--------------------------------------------
+ssh pi@raspberrypi.local
+
+--------------------------------------------
+3. CLEAN ANY OLD INSTALLS
+--------------------------------------------
+sudo systemctl stop mecamera 2>/dev/null
+sudo systemctl disable mecamera 2>/dev/null
+sudo rm -f /etc/systemd/system/mecamera.service
+sudo systemctl daemon-reload
+
+rm -rf ~/ME_CAM
+rm -rf ~/.cache/pip
+sudo apt autoremove -y
+sudo apt clean
+
+--------------------------------------------
+4. CLONE THE ME_CAMERA REPOSITORY
+--------------------------------------------
+cd ~
+git clone -b DEV https://github.com/MangiafestoElectronicsLLC/ME_CAM.git
+cd ME_CAM
+
+--------------------------------------------
+5. RUN THE AUTOMATED INSTALLER
+--------------------------------------------
+chmod +x setup.sh
+./setup.sh
+
+This installs:
+- Python 3.9 venv
+- OpenCV
+- NumPy
+- TFLite
+- Email + Google Drive dependencies
+- Config folders
+
+--------------------------------------------
+6. RUN ME CAMERA MANUALLY (FIRST TIME)
+--------------------------------------------
+source venv/bin/activate
+python3 main.py
+
+Open in browser:
+http://raspberrypi.local:8080
+
+You will see the FIRST RUN SETUP WIZARD.
+
+--------------------------------------------
+7. ENABLE AUTO-BOOT
+--------------------------------------------
+sudo cp systemd/mecamera.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable mecamera
+sudo systemctl start mecamera
+
+--------------------------------------------
+8. EMERGENCY BUTTON
+--------------------------------------------
+Dashboard → “Send Last Clip to First Responders”
+
+This:
+- Uploads clip to Google Drive (if enabled)
+- Emails clip + link (if enabled)
+
+--------------------------------------------
+9. FACTORY RESET
+--------------------------------------------
+./factory_reset.sh
+
+This wipes:
+- config.json
+- recordings
+- exports
+
+--------------------------------------------
+10. SELF UPDATE
+--------------------------------------------
+./self_update.sh
+
+Pulls latest DEV branch, reinstalls dependencies, restarts service.
+
+--------------------------------------------
+11. READY FOR MAIN BRANCH
+--------------------------------------------
+Once tested:
+git checkout main
+git merge DEV
+git push origin main
+
+--------------------------------------------
+END OF NOTES
+--------------------------------------------
+
+1. First Boot Setup
+SSH into the Pi:
+
+bash
+ssh pi@<your-pi-ip> 
+or
+ssh pi@raspberrypi.local
+
+
+Update system:
+sudo apt update && sudo apt full-upgrade -y
+sudo reboot
+
+2. Install System Dependencies
+Your project uses OpenCV, TensorFlow Lite, Flask, and camera stack components.
+Install everything required:
+sudo apt install -y \
+    python3 python3-pip python3-venv \
+    libatlas-base-dev \
+    libjpeg-dev libtiff5-dev libjasper-dev libpng-dev \
+    libavcodec-dev libavformat-dev libswscale-dev \
+    libv4l-dev v4l-utils \
+    libgtk2.0-dev \
+    libopenblas-dev liblapack-dev \
+    git
+
+Clone the DEV Branch
+cd ~
+git clone -b DEV https://github.com/MangiafestoElectronicsLLC/ME_CAM.git
+cd ME_CAM
+
+
+4. Create Virtual Environment
+Your repo expects Python 3.9 (Bullseye ships with 3.9)
+
+python3 -m venv venv
+source venv/bin/activate
+
+
+5. Install Python Dependencies
+Your requirements.txt includes OpenCV, Flask, TFLite runtime, etc. Install them:
+
+pip install --upgrade pip
+pip install -r requirements.txt
+
+If TensorFlow Lite fails (common on Pi Zero), install the correct wheel:
+
+pip install https://github.com/google-coral/pycoral/releases/download/release-frogfish/tflite_runtime-2.7.0-cp39-cp39-linux_armv7l.whl
+
+6. Run the Setup Script
+Your repo includes a setup.sh script for first‑run configuration.
+
+
+
+Make it executable: From (venv) pi@raspberrypi:~/ME_CAM/ME_CAM-DEV $ 
+chmod +x setup.sh
+./setup.sh
+
+This script:
+
+Creates config directories
+
+Copies default config
+
+Prepares storage paths
+
+Sets permissions
+
+▶️ 7. Test the Camera Pipeline
+Run the main program manually:
+
+python3 main.py
+
+You should see logs from:
+
+camera_pipeline.py
+
+motion_detector.py
+
+ai_person_detector.py
+
+web_dashboard.py
+
+If the dashboard loads, visit:
+
+Code
+http://<pi-ip>:5000
+🔁 8. Install the Systemd Service
+Your repo includes a service file at:
+
+Code
+etc/systemd/system/mecamera.service
+
+Install it:
+
+bash
+sudo cp etc/systemd/system/mecamera.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable mecamera.service
+sudo systemctl start mecamera.service
+Check logs:
+
+bash
+sudo journalctl -u mecamera.service -f
+🔐 Optional: WireGuard Setup
+Your repo includes a full guide at:
+docs/wireguard_setup.md
+
+🎉 Deployment Complete
+At this point:
+
+The camera boots automatically
+
+The dashboard is available on port 5000
+
+Motion/person detection runs continuously
+
+Clips are stored + encrypted (if enabled)
+
+Notifications (email/GDrive) work once configured
+
+
+
+ssh pi@raspberrypi.local
+
+pi@raspberrypi:~ $ cd ME_CAM
+pi@raspberrypi:~/ME_CAM $ source venv/bin/activate
+(venv) pi@raspberrypi:~/ME_CAM $ chmod +x setup.sh
+./setup.sh
+
+
+(venv) pi@raspberrypi:~/ME_CAM $ ls
+config.json        LICENSE             __pycache__       venv
+config_manager.py  main.py             README.md         web_dashboard.py
+encryptor.py       ME_CAM-DEV          requirements.txt
+face_detector.py   motion_detector.py  setup_mode
+(venv) pi@raspberrypi:~/ME_CAM $ cd ~/ME_CAM-DEV
+-bash: cd: /home/pi/ME_CAM-DEV: No such file or directory
+(venv) pi@raspberrypi:~/ME_CAM $ cd ~/ME_CAM/ME_CAM-DEV
+(venv) pi@raspberrypi:~/ME_CAM/ME_CAM-DEV $ ls
+ai_person_detector.py          main.py
+battery_monitor.py             motion_detector.py
+camera_pipeline.py             notes.txt
+CHANGES.md                     notifications
+cloud                          qr_generator.py
+config                         QUICKREF.md
+config_manager.py              README_FINAL.md
+DEPLOYMENT.md                  README.md
+docs                           requirements.txt
+encryptor.py                   self_update.sh
+etc                            setup_mode
+face_detector.py               setup.sh
+face_recognition_whitelist.py  smart_motion_filter.py
+factory_reset.sh               templates
+FEATURE_CHECKLIST.md           thumbnail_gen.py
+hub_config.json                user_auth.py
+hub.py                         utils
+IMPLEMENTATION_SUMMARY.md      watchdog.py
+libcamera_streamer.py          web
+LICENSE                        web_dashboard.py
+(venv) pi@raspberrypi:~/ME_CAM/ME_CAM-DEV $ python main.py
+
+
+if this error then try below:
+
+
+(venv) pi@raspberrypi:~/ME_CAM/ME_CAM-DEV $ python3 main.py
+RuntimeError: module compiled against API version 0xe but this version of numpy is 0xd
+Traceback (most recent call last):
+  File "/home/pi/ME_CAM/ME_CAM-DEV/main.py", line 2, in <module>
+    from web.app import app
+  File "/home/pi/ME_CAM/ME_CAM-DEV/web/app.py", line 13, in <module>
+    from watchdog import CameraWatchdog
+  File "/home/pi/ME_CAM/ME_CAM-DEV/watchdog.py", line 5, in <module>
+    from camera_pipeline import CameraPipeline
+  File "/home/pi/ME_CAM/ME_CAM-DEV/camera_pipeline.py", line 7, in <module>
+    from motion_detector import MotionDetector
+  File "/home/pi/ME_CAM/ME_CAM-DEV/motion_detector.py", line 1, in <module>
+    import cv2
+  File "/home/pi/ME_CAM/venv/lib/python3.9/site-packages/cv2/__init__.py", line 5, in <module>
+    from .cv2 import *
+ImportError: numpy.core.multiarray failed to import
+(venv) pi@raspberrypi:~/ME_CAM/ME_CAM-DEV $
+
+
+
+pip install --upgrade numpy
+
+pip install --upgrade numpy
+pip uninstall opencv-python opencv-python-headless opencv-contrib-python -y
+pip install opencv-python-headless
+
+pip install numpy==1.21.4
+pip install opencv-python-headless==4.5.5.64
+
+now retry:
+
+(venv) pi@raspberrypi:~/ME_CAM/ME_CAM-DEV $ python main.py
+
+==========================================================
+==========================================================
+
+------From Scratch Flash SD Card Via Raspberry Pi Imager
+
+Select Raspberry Pi Zero 2 W Board 
+
+Select custom image to flash and select within files 2023-05-03-raspios-bullseye-armhf-lite.img.xz
+
+After flash 
+
+Set Username and Password
+Configure Keyboard and Configure raspi-config to set up wifi
+
+Localization Configure Wi-Fi Country 
+advanced setting resize to use full SD card space
+Set WIFI
+Disable legacy camera
+reboot
+
+ssh pc into pi via 
+
+Open Window command terminal bash
+  ssh pi@raspberrypi.local
+
+(if .ssh issues remove old host and clear host .txt doc within pc)
+
+From: pi@raspberrypi:~ $
+
+bash: sudo apt update
+sudo apt install -y git
+
+cd ~
+git clone https://github.com/MangiafestoElectronicsLLC/ME_CAM.git
+
+
+From: pi@raspberrypi:~/ME_CAM $
+
+sudo apt update && sudo apt full-upgrade -y
+
+ sudo apt install -y \
+    python3 python3-pip python3-venv \
+    libatlas-base-dev \
+    libjpeg-dev libtiff5-dev libjasper-dev libpng-dev \
+    libavcodec-dev libavformat-dev libswscale-dev \
+    libv4l-dev v4l-utils \
+    libgtk2.0-dev \
+    libopenblas-dev liblapack-dev \
+    git
+
+Still Within: pi@raspberrypi:~/ME_CAM $
+Make venv and activate it and then install requirements.txt
+
+python3 -m venv venv
+source venv/bin/activate
+
+Within: (venv) pi@raspberrypi:~/ME_CAM $
+
+pip install --upgrade pip
+pip install -r requirements.txt
+
+If disconnects try: 
+(venv) pi@raspberrypi:~/ME_CAM $ client_loop: send disconnect: Connection reset
+
+ssh pi@raspberrypi.local
+
+
+cd ~/ME_CAM/ME_CAM-DEV
+
+{If:
+
+(venv) pi@raspberrypi:~/ME_CAM/ME_CAM-DEV $ ls
+ai_person_detector.py          main.py
+battery_monitor.py             motion_detector.py
+camera_pipeline.py             notes.txt
+CHANGES.md                     notifications
+cloud                          qr_generator.py
+config                         QUICKREF.md
+config_manager.py              README_FINAL.md
+DEPLOYMENT.md                  README.md
+docs                           requirements.txt
+encryptor.py                   self_update.sh
+etc                            setup_mode
+face_detector.py               setup.sh
+face_recognition_whitelist.py  smart_motion_filter.py
+factory_reset.sh               templates
+FEATURE_CHECKLIST.md           thumbnail_gen.py
+hub_config.json                user_auth.py
+hub.py                         utils
+IMPLEMENTATION_SUMMARY.md      watchdog.py
+libcamera_streamer.py          web
+LICENSE                        web_dashboard.py
+(venv) pi@raspberrypi:~/ME_CAM/ME_CAM-DEV $ python main.py
+Traceback (most recent call last):
+  File "/home/pi/ME_CAM/ME_CAM-DEV/main.py", line 1, in <module>
+    from loguru import logger
+ModuleNotFoundError: No module named 'loguru'
+
+}
+
+Then i Installed Everything on Directory of (venv) pi@raspberrypi:~/ME_CAM $
+Instead of (venv) pi@raspberrypi:~/ME_CAM/ME_CAM-DEV $
+
+cd ~/ME_CAM/ME_CAM-DEV
+
+Ensure, VENV is activate should show like (venv) pi@raspberrypi:~/ME_CAM/ME_CAM-DEV $
+
+pip install --upgrade pip
+pip install -r requirements.txt
+
+Still Within: (venv) pi@raspberrypi:~/ME_CAM/ME_CAM-DEV $
+
+chmod +x setup.sh
+./setup.sh
+
+Should See: === ME Camera Setup (Bullseye) ===
+
+And when Done: 
+=== Setup Complete ===
+Run ME Camera with:
+source venv/bin/activate && python3 main.py
+
+to test: (venv) pi@raspberrypi:~/ME_CAM/ME_CAM-DEV $ python3 main.py
+
+
+python3 main.py
+
+If Fails Like: 
+RuntimeError: module compiled against API version 0xe but this version of numpy is 0xd
+Traceback (most recent call last):
+  File "/home/pi/ME_CAM/ME_CAM-DEV/main.py", line 2, in <module>
+    from web.app import app
+  File "/home/pi/ME_CAM/ME_CAM-DEV/web/app.py", line 13, in <module>
+    from watchdog import CameraWatchdog
+  File "/home/pi/ME_CAM/ME_CAM-DEV/watchdog.py", line 5, in <module>
+    from camera_pipeline import CameraPipeline
+  File "/home/pi/ME_CAM/ME_CAM-DEV/camera_pipeline.py", line 7, in <module>
+    from motion_detector import MotionDetector
+  File "/home/pi/ME_CAM/ME_CAM-DEV/motion_detector.py", line 1, in <module>
+    import cv2
+  File "/home/pi/ME_CAM/venv/lib/python3.9/site-packages/cv2/__init__.py", line 5, in <module>
+    from .cv2 import *
+ImportError: numpy.core.multiarray failed to import
+
+Try:
+pip install --upgrade numpy
+
+pip install --upgrade numpy
+pip uninstall opencv-python opencv-python-headless opencv-contrib-python -y
+pip install opencv-python-headless
+
+Retry By:
+python3 main.py
+
+If Disconnects again try:
+
+ssh pi@raspberrypi.local
+
+cd ~/ME_CAM/ME_CAM-DEV
+
+source venv/bin/activate
+
+python3 main.py
+
+Now QR Code is found @  http://10.2.1.47:8080
+After Basic Setup and config
+Create Account and login (Will Likely need to reboot and run again)
+
+(Control + C to exit the working code and bash below commands)
+Sudo Reboot
+
+ssh pi@raspberrypi.local (Re-entry into pi from PC)
+
+cd ~/ME_CAM/ME_CAM-DEV   (Change to correct directory)
+
+source venv/bin/activate    (Activate VENV)
+
+python3 main.py       (RUN APP)
+
+
+Now to improve the GitHub project:
