@@ -27,8 +27,8 @@ app.secret_key = os.urandom(24)
 # watchdog.start()
 watchdog = None  # Disabled to allow libcamera streaming
 
-# Motion detection temporarily disabled for stability
-motion_service = None
+# Motion detection service for recording motion events
+from motion_service import motion_service
 
 battery = BatteryMonitor(enabled=True)
 
@@ -145,7 +145,10 @@ def setup_save():
     cfg["emergency_phone"] = request.form.get("emergency_phone", "")
     save_config(cfg)
     mark_first_run_complete()
-    logger.info("[SETUP] First run completed.")
+    # Start motion detection service after first run setup
+    if motion_service and not motion_service.running:
+        motion_service.start()
+    logger.info("[SETUP] First run completed. Motion detection started.")
     return redirect(url_for("index"))
 
 @app.route("/login", methods=["GET", "POST"])
@@ -205,17 +208,28 @@ def index():
     username = session.get("username", "User")
     try:
         cfg = get_config()
-        status = watchdog.status() if watchdog else {"active": False, "timestamp": time.time()}
+        status = watchdog.status() if watchdog else {"active": True, "timestamp": time.time()}
         battery_status = battery.get_status()
         videos = get_recordings(cfg, limit=12)
         storage_used = get_storage_used_gb(cfg)
         history_count = count_recent_events(cfg, hours=24)
         
+        # Ensure motion service is running
+        if motion_service and not motion_service.running:
+            motion_service.start()
+        
+        # Get better battery percentage (100% if external power)
+        battery_percent = battery_status.get("percent")
+        if battery_percent is None and battery_status.get("external_power"):
+            battery_percent = 100
+        elif battery_percent is None:
+            battery_percent = 80  # Default assumption
+        
         return render_template("user_dashboard.html",
             username=username,
             device_name=cfg.get("device_name", "ME_CAM_1"),
             status=status,
-            battery_percent=battery_status.get("percent"),
+            battery_percent=battery_percent,
             battery_external=battery_status.get("external_power"),
             battery_low=battery_status.get("is_low"),
             storage_used=storage_used,

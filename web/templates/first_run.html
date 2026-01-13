@@ -211,7 +211,8 @@
         <h2>Email Notifications (Optional)</h2>
         <div class="form-group">
           <label>
-            <input type="checkbox" name="email_enabled" {% if config.get('email', {}).get('enabled', False) %}checked{% endif %}>
+            <input type="checkbox" name="email_enabled" {% if config.get('email', {}).get('enabled', False) %}checked{%
+              endif %}>
             Enable Email Alerts
           </label>
         </div>
@@ -226,7 +227,8 @@
         <h2>Google Drive Backup (Optional)</h2>
         <div class="form-group">
           <label>
-            <input type="checkbox" name="gdrive_enabled" {% if config.get('google_drive', {}).get('enabled', False) %}checked{% endif %}>
+            <input type="checkbox" name="gdrive_enabled" {% if config.get('google_drive', {}).get('enabled', False)
+              %}checked{% endif %}>
             Enable Google Drive Backup
           </label>
         </div>
