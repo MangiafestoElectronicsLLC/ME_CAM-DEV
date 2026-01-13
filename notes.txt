@@ -367,7 +367,33 @@ Camera/Video performance:
 - This is reliable but slower than traditional streaming
 - Storage displays 0.0 GB until first recording is captured
 - Once motion is detected, recordings will appear in storage
+Motion detection not recording:
+- Motion detection service now runs automatically on app startup
+- Verify motion_service is running: check dashboard shows "Pipeline running"
+- Motion events will save to ~/recordings/ directory
+- Storage section updates automatically (may take 5 seconds)
+- Check logs: tail -f ~/ME_CAM-DEV/logs/mecam.log | grep MOTION
+- Ensure motion detection enabled during first-run setup
 
+Storage display not showing used/available space:
+- Dashboard now fetches real-time storage via /api/storage endpoint
+- Storage info refreshes every time you load /dashboard
+- Recordings directory: ~/ME_CAM-DEV/recordings
+- Try refreshing browser or check browser console for API errors
+- Available/Total/Used/Files displayed in real-time
+
+Battery/Power measurement improvements:
+- Battery percent now defaults to 100% when external power detected
+- Dashboard shows "External Power" when plugged in
+- For actual battery monitoring, hardware HAT with ADC required
+- To manually set battery level: edit config.json "battery_percent_override"
+- System detects undervoltage via vcgencmd (automatic)
+
+Dashboard Features:
+- "Send Last Clip to First Responders": Uploads to Google Drive + emails (if enabled)
+- Storage summary: Used/Available/Total/File count displayed in real-time
+- Motion recordings saved automatically when motion detected
+- Live camera feed: ~1-2 FPS MJPEG stream (normal for Pi Zero 2W)
 --------------------------------------------
 Dashboard → “Send Last Clip to First Responders”
 
