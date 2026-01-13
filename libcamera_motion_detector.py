@@ -43,7 +43,7 @@ class LibcameraMotionDetector:
                 "--immediate"
             ]
             
-            result = subprocess.run(cmd, capture_output=True, timeout=2, stderr=subprocess.DEVNULL)
+            result = subprocess.run(cmd, timeout=2, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             if result.returncode == 0 and os.path.exists(output_path):
                 frame = cv2.imread(output_path, cv2.IMREAD_GRAYSCALE)
                 return frame
