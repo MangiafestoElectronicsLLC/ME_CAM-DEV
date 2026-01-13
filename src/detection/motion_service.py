@@ -4,8 +4,8 @@ Background motion detection service that doesn't conflict with camera streaming
 import time
 import threading
 from loguru import logger
-from libcamera_motion_detector import LibcameraMotionDetector
-from config_manager import get_config
+from .libcamera_motion_detector import LibcameraMotionDetector
+from src.core import get_config
 
 class MotionDetectionService:
     """Run motion detection in background without blocking camera"""

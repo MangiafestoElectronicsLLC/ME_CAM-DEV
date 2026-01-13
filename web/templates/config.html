@@ -300,6 +300,75 @@
                         value="{{ config.get('storage', {}).get('retention_days', 7) }}">
                     <p class="help-text">Automatically delete recordings older than this many days (1-365)</p>
                 </div>
+
+                <div class="form-group">
+                    <label for="max_storage_gb">Maximum Storage (GB)</label>
+                    <input type="number" id="max_storage_gb" name="max_storage_gb" min="1" max="1000"
+                        value="{{ config.get('storage', {}).get('max_storage_gb', 10) }}" step="0.1">
+                    <p class="help-text">Maximum storage space for recordings before auto-cleanup</p>
+                </div>
+
+                <div class="form-group">
+                    <label for="cleanup_threshold">Auto-Cleanup Threshold (%)</label>
+                    <input type="number" id="cleanup_threshold" name="cleanup_threshold" min="50" max="99"
+                        value="{{ config.get('storage', {}).get('cleanup_when_full_percent', 90) }}">
+                    <p class="help-text">Start deleting oldest files when storage reaches this percentage</p>
+                </div>
+
+                <div class="checkbox-group">
+                    <input type="checkbox" id="keep_newest_files" name="keep_newest_files" {% if config.get('storage',
+                        {}).get('keep_newest_files', True) %}checked{% endif %}>
+                    <label for="keep_newest_files">Keep Newest Files When Cleaning Up</label>
+                </div>
+                <p class="help-text">Delete oldest recordings first during auto-cleanup</p>
+
+                <div class="checkbox-group">
+                    <input type="checkbox" id="organize_by_date" name="organize_by_date" {% if config.get('storage',
+                        {}).get('organize_by_date', True) %}checked{% endif %}>
+                    <label for="organize_by_date">Organize Recordings by Date (YYYY/MM/DD folders)</label>
+                </div>
+
+                <div class="checkbox-group">
+                    <input type="checkbox" id="thumbnail_generation" name="thumbnail_generation" {% if
+                        config.get('storage', {}).get('thumbnail_generation', True) %}checked{% endif %}>
+                    <label for="thumbnail_generation">Generate Thumbnails for Videos</label>
+                </div>
+                <p class="help-text">Create preview thumbnails (uses extra storage & CPU)</p>
+            </div>
+
+            <!-- Performance Settings Section -->
+            <div class="settings-section" style="border: 2px solid #4CAF50;">
+                <h3>⚡ Performance Settings</h3>
+                <p style="color: #4CAF50; font-size: 13px; margin-top: 0;">
+                    <strong>Why is this important?</strong> The default streaming method spawns a new subprocess for
+                    each frame (500-1000ms delay).
+                    Fast streaming uses continuous capture like your Tkinter GUI (30-60ms per frame) - 10-15x faster!
+                </p>
+
+                <div class="checkbox-group">
+                    <input type="checkbox" id="use_fast_streamer" name="use_fast_streamer" {% if config.get('camera',
+                        {}).get('use_fast_streamer', True) %}checked{% endif %}>
+                    <label for="use_fast_streamer"><strong>Use Fast Streaming (picamera2) - RECOMMENDED</strong></label>
+                </div>
+                <p class="help-text">
+                    <span style="color: #4CAF50;">✓ FAST:</span> Continuous capture, 15-30 FPS, instant response<br>
+                    <span style="color: #ff9800;">✗ SLOW:</span> Subprocess per frame, 1-2 FPS, high latency<br>
+                    Requires: <code>sudo apt install -y python3-picamera2</code>
+                </p>
+
+                <div class="form-group">
+                    <label for="stream_fps">Target Stream FPS</label>
+                    <input type="number" id="stream_fps" name="stream_fps" min="1" max="30"
+                        value="{{ config.get('camera', {}).get('stream_fps', 15) }}">
+                    <p class="help-text">Frames per second for live stream (only applies to fast streaming mode)</p>
+                </div>
+
+                <div class="form-group">
+                    <label for="motion_check_interval">Motion Check Interval (seconds)</label>
+                    <input type="number" id="motion_check_interval" name="motion_check_interval" min="0.1" max="5"
+                        value="{{ config.get('camera', {}).get('motion_check_interval', 0.2) }}" step="0.1">
+                    <p class="help-text">How often to check for motion (lower = faster detection, more CPU)</p>
+                </div>
             </div>
 
             <!-- Email Notifications Section -->

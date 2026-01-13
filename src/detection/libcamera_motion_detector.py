@@ -10,7 +10,7 @@ import subprocess
 from datetime import datetime
 from loguru import logger
 from threading import Lock
-from camera_coordinator import camera_coordinator
+from src.camera import camera_coordinator
 
 class LibcameraMotionDetector:
     """Motion detection using periodic libcamera snapshots"""

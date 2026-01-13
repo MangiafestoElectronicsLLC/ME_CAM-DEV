@@ -93,8 +93,11 @@
             <div class="camera-grid">
                 <div class="camera-card">
                     <div class="camera-feed active">
-                        <video id="liveStream" autoplay muted playsinline
-                            style="width: 100%; height: 100%; object-fit: cover;"></video>
+                        <!-- MJPEG stream display -->
+                        <img id="liveStream" src="/api/stream"
+                            style="width: 100%; height: 100%; object-fit: cover; display: block;"
+                            onload="this.style.display='block';"
+                            onerror="console.error('Stream failed'); setTimeout(() => { this.src='/api/stream?t=' + Date.now(); }, 2000);">
                     </div>
                     <div class="camera-info">
                         <div class="camera-name">{{ device_name or 'Main Camera' }}</div>

@@ -13,7 +13,10 @@
   "camera": {
     "resolution": "640x480",
     "recording_resolution": "1280x720",
-    "recording_duration": 30
+    "recording_duration": 30,
+    "stream_fps": 15,
+    "use_fast_streamer": true,
+    "motion_check_interval": 0.2
   },
   "email": {
     "enabled": false,
@@ -34,7 +37,16 @@
     "retention_days": 7,
     "motion_only": true,
     "encrypt": true,
-    "encrypted_dir": "recordings_encrypted"
+    "encrypted_dir": "recordings_encrypted",
+    "max_storage_gb": 10,
+    "auto_cleanup_enabled": true,
+    "cleanup_when_full_percent": 90,
+    "keep_newest_files": true,
+    "backup_to_usb": false,
+    "usb_backup_path": "/media/usb0/mecam_backup",
+    "compression_enabled": false,
+    "thumbnail_generation": true,
+    "organize_by_date": true
   },
   "detection": {
     "person_only": true,

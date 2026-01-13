@@ -1723,6 +1723,138 @@ Common fixes:
 
 
 ============================================
+🔧 COMPLETE TROUBLESHOOTING & FIX GUIDE
+(January 13, 2026 - Video & Motion Issues)
+============================================
+
+## 🎯 WHAT'S BROKEN & HOW TO FIX
+
+### ISSUE 1: Live Video Not Displaying
+**Root Cause**: Dashboard was using <video> tag instead of <img> for MJPEG stream
+
+**FIX STATUS**: ✅ FIXED
+- Dashboard.html updated to use: `<img src="/api/stream">`
+- MJPEG stream now displays correctly
+- Auto-reconnect on failure with 2 second retry
+
+**Deploy Fix**:
+```bash
+cd ~/ME_CAM-DEV
+git pull origin main
+sudo systemctl restart mecamera
+# Dashboard video should now display!
+```
+
+### ISSUE 2: Motion Detection Not Recording Videos
+**Root Cause**: Multiple possible issues:
+1. motion_service not starting
+2. camera_coordinator conflicts
+3. libcamera-vid timeout or permissions
+4. recordings directory doesn't exist
+
+**FIX STEPS**:
+```bash
+# SSH into Pi
+ssh pi@raspberrypi.local
+
+# Verify recordings directory
+mkdir -p ~/ME_CAM-DEV/recordings
+chmod 755 ~/ME_CAM-DEV/recordings
+
+# Check motion service status
+sudo systemctl status mecamera | grep -i motion
+
+# View live motion logs
+tail -f ~/ME_CAM-DEV/logs/mecam.log | grep MOTION
+
+# Test recording manually
+libcamera-vid -t 5000 -o ~/ME_CAM-DEV/recordings/test.mp4
+
+# If test works but dashboard doesn't record:
+# Service might need restart
+sudo systemctl restart mecamera
+```
+
+### ISSUE 3: No Performance Settings in Config Page
+**Root Cause**: Settings exist in HTML but may not be scrolling properly
+
+**FIX**: Scroll down in Settings page to find:
+- ⚡ Performance Settings (green section)
+- ✓ Use Fast Streaming checkbox
+- Stream FPS slider
+- Motion Check Interval
+
+**If still missing**:
+```bash
+cd ~/ME_CAM-DEV
+grep -n "Performance Settings" web/templates/config.html
+# Should show: line 341
+```
+
+### ISSUE 4: Dashboard Slow / 1-2 FPS
+**Root Cause**: Fast streaming not enabled OR picamera2 not installed
+
+**FIX STEPS**:
+
+**Step A: Ensure picamera2 installed**
+```bash
+ssh pi@raspberrypi.local
+sudo apt update
+sudo apt install -y python3-picamera2
+
+# Verify installation
+python3 -c "from picamera2 import Picamera2; print('✓ picamera2 installed')"
+```
+
+**Step B: Enable in Dashboard**
+1. Open: http://raspberrypi.local:8080
+2. Click ⚙️ Configure
+3. **Scroll down** to "⚡ Performance Settings" (green section)
+4. Check: ✓ Use Fast Streaming (picamera2) - RECOMMENDED
+5. Set: Target Stream FPS = 15 (or 20-30 if CPU allows)
+6. Click: Save Settings
+7. Dashboard auto-restarts
+
+**Step C: Restart Service**
+```bash
+sudo systemctl restart mecamera
+
+# Verify it started
+sudo systemctl status mecamera | head -20
+
+# Should show: [CAMERA] Fast streamer initialized
+```
+
+**Step D: Test Speed**
+- Open dashboard: http://raspberrypi.local:8080
+- Watch live camera for smoothness
+- Should be 15-30 FPS (smooth like phone!)
+- Not 1-2 FPS (jerky)
+
+### ISSUE 5: Website Not Secure / No Login Working
+**Root Cause**: Authentication exists but PIN setup might be in first-run
+
+**Verify Auth Working**:
+1. Log out: Click Logout
+2. Try access: http://raspberrypi.local:8080
+3. Should redirect to login
+
+**If no login**:
+```bash
+# Check config has users
+grep -A5 '"users"' ~/ME_CAM-DEV/config/config.json | head -20
+
+# Check for first-run status
+grep "first_run" ~/ME_CAM-DEV/config/config.json
+
+# If needed, reset and re-setup
+sudo systemctl stop mecamera
+rm ~/ME_CAM-DEV/config/config.json
+sudo systemctl start mecamera
+# Will show first-run setup wizard on access
+```
+
+============================================
 ⚡ QUICK REFERENCE CARD
 ============================================
 

@@ -2,7 +2,7 @@ import subprocess
 import time
 from loguru import logger
 import os
-from camera_coordinator import camera_coordinator
+from .camera_coordinator import camera_coordinator
 
 class LibcameraStreamer:
     """Stream video using libcamera (native Raspberry Pi camera support)."""

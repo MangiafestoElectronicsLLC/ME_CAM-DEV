@@ -6,17 +6,23 @@ from datetime import datetime
 import time
 import sys
 
-# Add parent directory to path so we can import modules from the root
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Add src directory to path
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'src'))
 
-from config_manager import get_config, save_config, is_first_run, mark_first_run_complete
-from watchdog import CameraWatchdog
-from camera_pipeline import CameraPipeline
-from battery_monitor import BatteryMonitor
-from thumbnail_gen import extract_thumbnail
-from user_auth import authenticate, create_user, user_exists, get_user
-from libcamera_streamer import LibcameraStreamer, is_libcamera_available
-from qr_generator import generate_setup_qr
+# Import from organized structure
+from src.core import (
+    get_config, save_config, is_first_run, mark_first_run_complete,
+    authenticate, create_user, user_exists, get_user,
+    BatteryMonitor, extract_thumbnail, generate_setup_qr
+)
+from src.camera import (
+    camera_coordinator, LibcameraStreamer, is_libcamera_available,
+    FastCameraStreamer, FastMotionDetector, PICAMERA2_AVAILABLE
+)
+from src.detection import motion_service, CameraWatchdog
+
+# Check if fast streamer available
+fast_streamer_available = PICAMERA2_AVAILABLE
 
 # Explicitly set template/static folders inside the web package to avoid confusion
 app = Flask(__name__, template_folder='templates', static_folder='static')
@@ -27,20 +33,44 @@ app.secret_key = os.urandom(24)
 # watchdog.start()
 watchdog = None  # Disabled to allow libcamera streaming
 
-# Motion detection service for recording motion events
-# Re-enabled with camera coordinator to prevent conflicts
-from motion_service import motion_service
-
 battery = BatteryMonitor(enabled=True)
 
-# Initialize camera streamer
-camera_available = is_libcamera_available()
-if camera_available:
+# Initialize camera streamer - use fast streamer if available
+cfg = get_config()
+use_fast = cfg.get("camera", {}).get("use_fast_streamer", True)
+
+camera_available = False
+camera_streamer = None
+fast_motion_detector = None
+
+if fast_streamer_available and use_fast:
+    try:
+        # Initialize fast streamer (picamera2 - 15-30 FPS!)
+        resolution = cfg.get('camera', {}).get('resolution', '640x480')
+        width, height = map(int, resolution.split('x'))
+        fps = cfg.get('camera', {}).get('stream_fps', 15)
+        
+        camera_streamer = FastCameraStreamer(width=width, height=height, fps=fps)
+        if camera_streamer.start():
+            camera_available = True
+            logger.success(f"[CAMERA] Fast streamer initialized: {width}x{height} @ {fps} FPS")
+            
+            # Initialize fast motion detector
+            fast_motion_detector = FastMotionDetector(camera_streamer, cfg)
+            logger.info("[CAMERA] Fast motion detector ready")
+        else:
+            camera_streamer = None
+    except Exception as e:
+        logger.error(f"[CAMERA] Fast streamer initialization failed: {e}")
+        camera_streamer = None
+
+# Fallback to slow libcamera-still approach
+if not camera_streamer and is_libcamera_available():
     camera_streamer = LibcameraStreamer()
-    logger.info("[CAMERA] libcamera available, using native streaming")
+    camera_available = True
+    logger.info("[CAMERA] Using libcamera-still fallback (slow - 1-2 FPS)")
 else:
-    camera_streamer = None
-    logger.warning("[CAMERA] libcamera not available, camera stream disabled")
+    logger.warning("[CAMERA] No camera available")
 
 # Helpers for recordings/storage info
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -405,6 +435,18 @@ def settings():
                     cfg["storage"] = {}
                 cfg["storage"]["motion_only"] = request.form.get("motion_recording_enabled") == "on"
                 cfg["storage"]["retention_days"] = int(request.form.get("storage_retention_days", 7))
+                cfg["storage"]["max_storage_gb"] = float(request.form.get("max_storage_gb", 10))
+                cfg["storage"]["cleanup_when_full_percent"] = int(request.form.get("cleanup_threshold", 90))
+                cfg["storage"]["keep_newest_files"] = request.form.get("keep_newest_files") == "on"
+                cfg["storage"]["organize_by_date"] = request.form.get("organize_by_date") == "on"
+                cfg["storage"]["thumbnail_generation"] = request.form.get("thumbnail_generation") == "on"
+                
+                # Camera/Performance settings
+                if "camera" not in cfg:
+                    cfg["camera"] = {}
+                cfg["camera"]["use_fast_streamer"] = request.form.get("use_fast_streamer") == "on"
+                cfg["camera"]["stream_fps"] = int(request.form.get("stream_fps", 15))
+                cfg["camera"]["motion_check_interval"] = float(request.form.get("motion_check_interval", 0.2))
                 
                 # Email
                 if "email" not in cfg:
@@ -444,8 +486,8 @@ def settings():
         return render_template("config.html", config={}, error=f"Failed to load settings: {str(e)}")
 
 def gen_mjpeg():
-    """Generate MJPEG frames from camera using libcamera."""
-    import time  # Import at function start
+    """Generate MJPEG frames from camera - FAST if using picamera2!"""
+    import time
     
     if not camera_streamer:
         logger.warning("[STREAM] Camera streamer not available")
@@ -455,19 +497,28 @@ def gen_mjpeg():
     BOUNDARY = b'MJPEGBOUNDARY'
     frame_count = 0
     
-    # Stream MJPEG with individual frames captured via libcamera-still
+    # Check if using fast streamer
+    is_fast_streamer = hasattr(camera_streamer, 'get_jpeg_frame')
+    
+    if is_fast_streamer:
+        logger.debug("[STREAM] Using FAST streaming mode (picamera2)")
+    else:
+        logger.debug("[STREAM] Using SLOW streaming mode (libcamera-still subprocess)")
+    
     while True:
         try:
-            # Get resolution from config
-            cfg = get_config()
-            resolution = cfg.get('camera', {}).get('resolution', '640x480')
-            width, height = map(int, resolution.split('x'))
-            
-            jpeg_data = camera_streamer.get_single_frame_jpeg(width, height)
+            if is_fast_streamer:
+                # FAST MODE: Get pre-captured frame (instant!)
+                jpeg_data = camera_streamer.get_jpeg_frame()
+            else:
+                # SLOW MODE: Capture new frame via subprocess (500-1000ms)
+                cfg = get_config()
+                resolution = cfg.get('camera', {}).get('resolution', '640x480')
+                width, height = map(int, resolution.split('x'))
+                jpeg_data = camera_streamer.get_single_frame_jpeg(width, height)
             
             if jpeg_data:
                 frame_count += 1
-                # Proper MJPEG boundary format for browsers
                 yield b'--' + BOUNDARY + b'\r\n'
                 yield b'Content-Type: image/jpeg\r\n'
                 yield b'Content-Length: ' + str(len(jpeg_data)).encode() + b'\r\n'
@@ -475,11 +526,14 @@ def gen_mjpeg():
                 yield jpeg_data
                 yield b'\r\n'
                 
-                # Longer delay for Pi Zero 2 W (2-3 FPS)
-                time.sleep(0.5)
+                # Fast mode doesn't need long delays
+                if is_fast_streamer:
+                    time.sleep(0.033)  # 30 FPS max
+                else:
+                    time.sleep(0.5)  # 2 FPS for slow mode
             else:
                 logger.debug("[STREAM] Failed to capture frame, retrying...")
-                time.sleep(1.0)
+                time.sleep(0.5 if is_fast_streamer else 1.0)
                 
         except Exception as e:
             logger.error(f"[STREAM] Frame generation error: {e}")
@@ -650,6 +704,151 @@ def clear_storage():
         return jsonify({"ok": True, "deleted": deleted_count})
     except Exception as e:
         logger.error(f"[STORAGE] Clear error: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/storage/stats")
+def storage_stats():
+    """Get detailed storage statistics"""
+    if not require_auth():
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    try:
+        cfg = get_config()
+        rec_path = _recordings_path(cfg)
+        import shutil
+        
+        # Get disk usage
+        disk = shutil.disk_usage(rec_path if os.path.exists(rec_path) else BASE_DIR)
+        
+        # Count files by type
+        video_files = []
+        total_video_bytes = 0
+        
+        if os.path.isdir(rec_path):
+            for filename in os.listdir(rec_path):
+                if filename.lower().endswith(('.mp4', '.mov', '.avi', '.mkv')):
+                    filepath = os.path.join(rec_path, filename)
+                    size = os.path.getsize(filepath)
+                    mtime = os.path.getmtime(filepath)
+                    total_video_bytes += size
+                    video_files.append({
+                        "name": filename,
+                        "size_mb": round(size / (1024**2), 2),
+                        "date": datetime.fromtimestamp(mtime).isoformat()
+                    })
+        
+        # Sort by date descending
+        video_files.sort(key=lambda x: x["date"], reverse=True)
+        
+        # Storage limits from config
+        storage_cfg = cfg.get("storage", {})
+        max_gb = storage_cfg.get("max_storage_gb", 10)
+        cleanup_percent = storage_cfg.get("cleanup_when_full_percent", 90)
+        
+        used_gb = total_video_bytes / (1024**3)
+        total_gb = disk.total / (1024**3)
+        available_gb = disk.free / (1024**3)
+        used_percent = (used_gb / max_gb * 100) if max_gb > 0 else 0
+        
+        return jsonify({
+            "ok": True,
+            "storage": {
+                "used_gb": round(used_gb, 2),
+                "available_gb": round(available_gb, 2),
+                "total_gb": round(total_gb, 2),
+                "used_percent": round(used_percent, 1),
+                "max_gb": max_gb,
+                "cleanup_threshold_percent": cleanup_percent
+            },
+            "files": {
+                "count": len(video_files),
+                "total_mb": round(total_video_bytes / (1024**2), 2),
+                "list": video_files[:50]  # Limit to 50 most recent
+            },
+            "warnings": {
+                "near_limit": used_percent > cleanup_percent,
+                "message": f"Storage {used_percent:.1f}% full" if used_percent > cleanup_percent else None
+            }
+        })
+    except Exception as e:
+        logger.error(f"[STORAGE] Stats error: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/storage/cleanup", methods=["POST"])
+def storage_cleanup():
+    """Clean up old recordings based on retention policy"""
+    if not require_auth():
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    try:
+        cfg = get_config()
+        storage_cfg = cfg.get("storage", {})
+        rec_path = _recordings_path(cfg)
+        
+        retention_days = storage_cfg.get("retention_days", 7)
+        keep_newest = storage_cfg.get("keep_newest_files", True)
+        
+        cutoff_time = time.time() - (retention_days * 24 * 3600)
+        deleted_files = []
+        kept_files = []
+        
+        if os.path.isdir(rec_path):
+            files_with_mtime = []
+            for filename in os.listdir(rec_path):
+                if filename.lower().endswith(('.mp4', '.mov', '.avi', '.mkv')):
+                    filepath = os.path.join(rec_path, filename)
+                    mtime = os.path.getmtime(filepath)
+                    files_with_mtime.append((filename, filepath, mtime))
+            
+            # Sort by modification time (oldest first)
+            files_with_mtime.sort(key=lambda x: x[2])
+            
+            for filename, filepath, mtime in files_with_mtime:
+                if mtime < cutoff_time:
+                    try:
+                        size = os.path.getsize(filepath)
+                        os.remove(filepath)
+                        deleted_files.append({
+                            "name": filename,
+                            "size_mb": round(size / (1024**2), 2),
+                            "age_days": round((time.time() - mtime) / 86400, 1)
+                        })
+                        logger.info(f"[CLEANUP] Deleted old file: {filename}")
+                    except Exception as e:
+                        logger.error(f"[CLEANUP] Failed to delete {filename}: {e}")
+                else:
+                    kept_files.append(filename)
+        
+        return jsonify({
+            "ok": True,
+            "deleted_count": len(deleted_files),
+            "kept_count": len(kept_files),
+            "deleted_files": deleted_files,
+            "retention_days": retention_days
+        })
+    except Exception as e:
+        logger.error(f"[CLEANUP] Error: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/camera/stats")
+def camera_stats():
+    """Get camera performance statistics"""
+    if not require_auth():
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    try:
+        stats = {
+            "streaming_mode": "fast" if hasattr(camera_streamer, 'get_stats') else "slow",
+            "camera_available": camera_available
+        }
+        
+        # Get performance stats if using fast streamer
+        if hasattr(camera_streamer, 'get_stats'):
+            stats.update(camera_streamer.get_stats())
+        
+        return jsonify({"ok": True, "stats": stats})
+    except Exception as e:
+        logger.error(f"[CAMERA] Stats error: {e}")
         return jsonify({"ok": False, "error": str(e)}), 500
 
 if __name__ == "__main__":
