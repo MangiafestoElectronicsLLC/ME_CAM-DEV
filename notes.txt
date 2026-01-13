@@ -299,8 +299,11 @@ You will see the FIRST RUN SETUP WIZARD.
 After the first manual run is successful, enable auto-boot so ME_CAM starts
 automatically whenever the Pi boots up (no SSH or manual start needed).
 
+IMPORTANT: Pull the latest code first to get the corrected service file!
+
 On your Pi, run:
 
+git pull origin main
 sudo cp etc/systemd/system/mecamera.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable mecamera
