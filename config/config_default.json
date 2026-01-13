@@ -1,8 +1,13 @@
 {
   "device_name": "ME_CAM_1",
+  "device_location": "",
   "pin_enabled": true,
   "pin_code": "1234",
   "emergency_phone": "+1-800-555-0123",
+  "emergency_primary_contact": "",
+  "owner_email": "",
+  "security_contacts": [],
+  "emergency_mode": "manual",
   "wifi_enabled": false,
   "bluetooth_enabled": false,
   "camera": {

@@ -10,6 +10,7 @@ import subprocess
 from datetime import datetime
 from loguru import logger
 from threading import Lock
+from camera_coordinator import camera_coordinator
 
 class LibcameraMotionDetector:
     """Motion detection using periodic libcamera snapshots"""
@@ -31,25 +32,31 @@ class LibcameraMotionDetector:
         
     def capture_frame(self):
         """Capture a single frame for motion analysis"""
-        try:
-            output_path = "/tmp/motion_detection/current.jpg"
-            cmd = [
-                "libcamera-still",
-                "--width", "640",
-                "--height", "480",
-                "-o", output_path,
-                "--nopreview",
-                "-t", "100",
-                "--immediate"
-            ]
+        # Use camera coordinator to prevent conflicts with streaming
+        with camera_coordinator.access(user="motion_detection", priority="normal") as granted:
+            if not granted:
+                # Camera busy with streaming - skip this check
+                return None
             
-            result = subprocess.run(cmd, timeout=2, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            if result.returncode == 0 and os.path.exists(output_path):
-                frame = cv2.imread(output_path, cv2.IMREAD_GRAYSCALE)
-                return frame
-        except Exception as e:
-            logger.warning(f"[MOTION] Frame capture failed: {e}")
-        return None
+            try:
+                output_path = "/tmp/motion_detection/current.jpg"
+                cmd = [
+                    "libcamera-still",
+                    "--width", "640",
+                    "--height", "480",
+                    "-o", output_path,
+                    "--nopreview",
+                    "-t", "100",
+                    "--immediate"
+                ]
+                
+                result = subprocess.run(cmd, timeout=2, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                if result.returncode == 0 and os.path.exists(output_path):
+                    frame = cv2.imread(output_path, cv2.IMREAD_GRAYSCALE)
+                    return frame
+            except Exception as e:
+                logger.warning(f"[MOTION] Frame capture failed: {e}")
+            return None
     
     def detect_motion(self, current_frame):
         """Simple frame difference motion detection"""

@@ -28,9 +28,8 @@ app.secret_key = os.urandom(24)
 watchdog = None  # Disabled to allow libcamera streaming
 
 # Motion detection service for recording motion events
-# Disabled temporarily due to camera lock conflict with streaming
-# TODO: Implement queue or locking mechanism to coordinate camera access
-motion_service = None
+# Re-enabled with camera coordinator to prevent conflicts
+from motion_service import motion_service
 
 battery = BatteryMonitor(enabled=True)
 
@@ -204,6 +203,14 @@ def index():
     if not require_auth():
         return redirect(url_for("login"))
     
+    # Start motion detection service if not already running (with camera coordination)
+    if motion_service and not motion_service.running:
+        try:
+            motion_service.start()
+            logger.info("[DASHBOARD] Motion detection service started")
+        except Exception as e:
+            logger.warning(f"[DASHBOARD] Could not start motion service: {e}")
+    
     username = session.get("username", "User")
     try:
         cfg = get_config()
@@ -291,40 +298,58 @@ def api_status():
 
 @app.route("/api/trigger_emergency", methods=["POST"])
 def trigger_emergency():
+    """Enhanced emergency trigger with medical and security options"""
     try:
+        from emergency_handler import emergency_handler
+        
         cfg = get_config()
-        emergency_phone = cfg.get('emergency_phone', 'Not configured')
+        emergency_mode = cfg.get('emergency_mode', 'manual')
         
-        logger.info(f"[EMERGENCY] Emergency triggered - Contact: {emergency_phone}")
+        # Get emergency type from request (default to general)
+        emergency_type = request.json.get('type', 'general') if request.is_json else 'general'
         
-        # Send email notification if configured
-        email_cfg = cfg.get('email', {})
-        if email_cfg.get('enabled', False):
-            try:
-                from cloud.email_notifier import EmailNotifier
-                notifier = EmailNotifier(
-                    enabled=True,
-                    smtp_host=email_cfg.get('smtp_server', ''),
-                    smtp_port=email_cfg.get('smtp_port', 587),
-                    username=email_cfg.get('username', ''),
-                    password=email_cfg.get('password', ''),
-                    from_addr=email_cfg.get('from_address', ''),
-                    to_addr=email_cfg.get('to_address', '')
-                )
-                notifier.send_alert(
-                    "🚨 EMERGENCY ALERT - ME_CAM",
-                    f"Emergency button pressed!\\n\\nDevice: {cfg.get('device_name', 'ME_CAM')}\\nTime: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\\nEmergency Contact: {emergency_phone}\\n\\nPlease respond immediately."
-                )
-                logger.info("[EMERGENCY] Email notification sent")
-            except Exception as e:
-                logger.error(f"[EMERGENCY] Failed to send email: {e}")
+        logger.critical(f"[EMERGENCY] Emergency trigger activated - Type: {emergency_type}, Mode: {emergency_mode}")
         
-        return jsonify({
-            "ok": True,
-            "message": "Emergency contact notified",
-            "contact": emergency_phone,
-            "timestamp": time.time()
-        })
+        # Get latest recording for evidence
+        latest_recording = emergency_handler.get_latest_recording()
+        
+        # Trigger appropriate emergency response
+        if emergency_type == 'medical' or emergency_type == 'seizure':
+            success = emergency_handler.trigger_medical_emergency(
+                event_type='seizure',
+                video_path=latest_recording
+            )
+            message = f"Medical emergency alert sent to {cfg.get('emergency_primary_contact', 'configured contact')}"
+            
+        elif emergency_type == 'security' or emergency_type == 'theft':
+            success = emergency_handler.trigger_security_emergency(
+                event_type='theft',
+                video_path=latest_recording
+            )
+            message = f"Security alert sent to {cfg.get('owner_email', 'configured contacts')}"
+            
+        else:
+            # General emergency (SOS button)
+            success = emergency_handler.trigger_general_emergency(
+                message="Emergency SOS button pressed"
+            )
+            message = f"Emergency alert sent to {cfg.get('emergency_primary_contact', cfg.get('emergency_phone', 'Not configured'))}"
+        
+        if success:
+            return jsonify({
+                "ok": True,
+                "message": message,
+                "emergency_type": emergency_type,
+                "video_included": latest_recording is not None,
+                "timestamp": time.time()
+            })
+        else:
+            return jsonify({
+                "ok": False,
+                "error": "Failed to send emergency notification. Check email configuration.",
+                "timestamp": time.time()
+            }), 500
+            
     except Exception as e:
         logger.error(f"[EMERGENCY] Error triggering emergency: {e}")
         return jsonify({
@@ -345,6 +370,20 @@ def settings():
                 # Optional integrations
                 cfg["wifi_enabled"] = request.form.get("wifi_enabled") == "on"
                 cfg["bluetooth_enabled"] = request.form.get("bluetooth_enabled") == "on"
+                
+                # Emergency Contacts
+                cfg["device_location"] = request.form.get("device_location", "")
+                cfg["emergency_primary_contact"] = request.form.get("emergency_primary_contact", "")
+                cfg["owner_email"] = request.form.get("owner_email", "")
+                
+                # Parse comma-separated security contacts
+                security_contacts_str = request.form.get("security_contacts", "")
+                cfg["security_contacts"] = [c.strip() for c in security_contacts_str.split(",") if c.strip()]
+                
+                cfg["emergency_mode"] = request.form.get("emergency_mode", "manual")
+                
+                # Backward compatibility
+                cfg["emergency_phone"] = cfg["emergency_primary_contact"]
                 
                 # Camera settings
                 if "camera" not in cfg:

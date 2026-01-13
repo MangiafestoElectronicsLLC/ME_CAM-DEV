@@ -167,6 +167,62 @@
                 <p class="help-text">Enable Bluetooth pairing for remote control</p>
             </div>
 
+            <!-- Emergency Contacts Section -->
+            <div class="settings-section" style="border: 2px solid #d32f2f;">
+                <h3>🚨 Emergency Contacts</h3>
+                <p style="color: #ff6b6b; margin-bottom: 15px;">Configure contacts for medical emergencies and security
+                    alerts</p>
+
+                <div class="form-group">
+                    <label for="device_location">Device Location</label>
+                    <input type="text" id="device_location" name="device_location"
+                        value="{{ config.get('device_location', '') }}" placeholder="e.g., Living Room, Front Door">
+                    <p class="help-text">Physical location of this camera (included in emergency alerts)</p>
+                </div>
+
+                <div class="form-group">
+                    <label for="emergency_primary_contact">Primary Emergency Contact (Medical)</label>
+                    <input type="text" id="emergency_primary_contact" name="emergency_primary_contact"
+                        value="{{ config.get('emergency_primary_contact', config.get('emergency_phone', '')) }}"
+                        placeholder="+1-555-0123 or email@example.com">
+                    <p class="help-text">For medical emergencies (seizures, falls). Use phone email gateway for SMS:
+                        5551234567@vtext.com (Verizon), @txt.att.net (AT&T), @tmomail.net (T-Mobile)</p>
+                </div>
+
+                <div class="form-group">
+                    <label for="owner_email">Property Owner Email (Security)</label>
+                    <input type="email" id="owner_email" name="owner_email"
+                        value="{{ config.get('owner_email', config.get('email', {}).get('to_address', '')) }}"
+                        placeholder="owner@example.com">
+                    <p class="help-text">For security alerts (theft, break-in). Receives video evidence.</p>
+                </div>
+
+                <div class="form-group">
+                    <label for="security_contacts">Additional Security Contacts (comma-separated)</label>
+                    <input type="text" id="security_contacts" name="security_contacts"
+                        value="{{ ','.join(config.get('security_contacts', [])) }}"
+                        placeholder="police@dept.gov, insurance@company.com">
+                    <p class="help-text">Comma-separated emails for police reports and insurance claims</p>
+                </div>
+
+                <div class="form-group">
+                    <label for="emergency_mode">Emergency Detection Mode</label>
+                    <select id="emergency_mode" name="emergency_mode"
+                        style="width: 100%; padding: 8px 12px; background: #0f0f0f; border: 1px solid #444; border-radius: 6px; color: #e0e0e0;">
+                        <option value="manual" {% if config.get('emergency_mode', 'manual' )=='manual' %}selected{%
+                            endif %}>Manual Only (SOS Button)</option>
+                        <option value="medical" {% if config.get('emergency_mode')=='medical' %}selected{% endif %}>
+                            Medical Monitoring (Motion + AI Analysis)</option>
+                        <option value="security" {% if config.get('emergency_mode')=='security' %}selected{% endif %}>
+                            Security Mode (Intrusion Detection)</option>
+                        <option value="both" {% if config.get('emergency_mode')=='both' %}selected{% endif %}>Both
+                            Medical & Security</option>
+                    </select>
+                    <p class="help-text">Manual = Only send alerts when SOS button pressed. Medical/Security = Automatic
+                        alerts based on AI detection.</p>
+                </div>
+            </div>
+
             <!-- Camera Settings Section -->
             <div class="settings-section">
                 <h3>📹 Camera Settings</h3>
