@@ -1,8 +1,6 @@
 import smtplib
 from email.mime.text import MIMEText
-from utils.logger import get_logger
-
-logger = get_logger("email_notifier")
+from loguru import logger
 
 
 class EmailNotifier:

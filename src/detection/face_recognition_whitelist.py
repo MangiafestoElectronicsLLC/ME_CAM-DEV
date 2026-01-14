@@ -1,7 +1,5 @@
 from typing import List
-from utils.logger import get_logger
-
-logger = get_logger("face_whitelist")
+from loguru import logger
 
 try:
     import face_recognition

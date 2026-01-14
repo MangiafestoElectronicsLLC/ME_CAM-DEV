@@ -5,8 +5,8 @@ import os
 import time
 from datetime import datetime
 from loguru import logger
-from config_manager import get_config
-from cloud.email_notifier import EmailNotifier
+from src.core.config_manager import get_config
+from src.utils.cloud.email_notifier import EmailNotifier
 from pathlib import Path
 
 class EmergencyHandler:

@@ -1,8 +1,6 @@
 import subprocess
-from utils.logger import get_logger
-from config_manager import get_config
-
-logger = get_logger("battery_monitor")
+from loguru import logger
+from src.core.config_manager import get_config
 
 
 class BatteryMonitor:

@@ -4,11 +4,11 @@ import cv2
 from loguru import logger
 from datetime import datetime, timedelta
 
-from config_manager import get_config
-from ai_person_detector import PersonDetector
-from motion_detector import MotionDetector
-from smart_motion_filter import SmartMotionFilter
-from encryptor import encrypt_file
+from src.core.config_manager import get_config
+from src.detection.ai_person_detector import PersonDetector
+from src.detection.motion_detector import MotionDetector
+from src.detection.smart_motion_filter import SmartMotionFilter
+from src.core.encryptor import encrypt_file
 
 
 class CameraPipeline:

@@ -63,7 +63,7 @@ If disconnects try:
 (venv) pi@raspberrypi:~/ME_CAM $ client_loop: send disconnect: Connection reset
 
 ssh pi@raspberrypi.local
-
+ssh pi@10.2.1.47
 
 cd ~/ME_CAM/ME_CAM-DEV
 

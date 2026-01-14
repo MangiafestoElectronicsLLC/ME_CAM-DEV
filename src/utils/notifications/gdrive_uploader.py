@@ -1,7 +1,7 @@
 from pydrive2.auth import GoogleAuth
 from pydrive2.drive import GoogleDrive
 from loguru import logger
-from config_manager import get_config
+from src.core.config_manager import get_config
 import os
 
 def upload_to_gdrive(filepath):

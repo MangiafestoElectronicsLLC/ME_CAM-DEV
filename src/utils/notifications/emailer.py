@@ -1,6 +1,6 @@
 import yagmail
 from loguru import logger
-from config_manager import get_config
+from src.core.config_manager import get_config
 
 def send_email(subject, body, attachments=None):
     cfg = get_config()

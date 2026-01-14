@@ -1,10 +1,8 @@
 import threading
 import time
 from threading import Event
-from utils.logger import get_logger
-from camera_pipeline import CameraPipeline
-
-logger = get_logger("watchdog")
+from loguru import logger
+from src.camera.camera_pipeline import CameraPipeline
 
 
 class CameraWatchdog:

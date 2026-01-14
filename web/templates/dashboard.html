@@ -281,6 +281,17 @@
     </div>
 
     <script>
+        // Helper function to get API base URL (works with domain or IP)
+        function getApiBaseUrl() {
+            const protocol = window.location.protocol; // http: or https:
+            const hostname = window.location.hostname; // ME_CAM.com or IP
+            const port = window.location.port ? ':' + window.location.port : '';
+            return protocol + '//' + hostname + port;
+        }
+
+        // For cleaner code, set this once
+        const API_BASE = getApiBaseUrl();
+
         // Enhanced dashboard with performance monitoring
         let frameCount = 0;
         let lastFrameTime = Date.now();

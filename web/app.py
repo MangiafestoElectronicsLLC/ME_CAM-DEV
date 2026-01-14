@@ -1328,4 +1328,27 @@ def camera_stats():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080, debug=False)
+    import ssl
+    
+    # Check for HTTPS certificates
+    cert_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'certs', 'cert.pem')
+    key_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'certs', 'key.pem')
+    
+    ssl_context = None
+    if os.path.exists(cert_file) and os.path.exists(key_file):
+        try:
+            ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            ssl_context.load_cert_chain(cert_file, key_file)
+            logger.info("[HTTPS] SSL certificates loaded, running with HTTPS")
+        except Exception as e:
+            logger.warning(f"[HTTPS] Failed to load certificates: {e}, falling back to HTTP")
+            ssl_context = None
+    else:
+        logger.info("[HTTP] No SSL certificates found, running in HTTP mode")
+        logger.info("[HTTPS] To enable HTTPS, create certificates at: certs/cert.pem and certs/key.pem")
+    
+    # Run Flask app
+    if ssl_context:
+        app.run(host="0.0.0.0", port=8080, ssl_context=ssl_context, debug=False, threaded=True)
+    else:
+        app.run(host="0.0.0.0", port=8080, debug=False, threaded=True)
