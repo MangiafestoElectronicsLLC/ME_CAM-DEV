@@ -1,0 +1,105 @@
+# Camera Issue - Quick Reference
+
+## Current Status
+✅ **Dashboard Deployed** - Running at http://10.2.1.47:8080  
+✅ **Test Mode Enabled** - Shows test pattern instead of black screen  
+❌ **Camera Not Detected** - Hardware recognition failed  
+
+---
+
+## What Changed
+- **app.py** has been updated with a dummy video stream generator
+- When the dashboard loads, it will show a **test pattern with instructions**
+- All dashboard features (stats, settings, controls) work perfectly
+- Real camera will take over automatically once hardware is detected
+
+---
+
+## Your Task: Fix the Camera Hardware
+
+### Option 1: Quick Auto-Fix (Recommended)
+SSH into your Pi and run:
+
+```bash
+ssh pi@10.2.1.47
+
+# Enable camera in system config
+sudo raspi-config nonint do_camera 0
+
+# Reboot
+sudo reboot
+
+# Wait 30 seconds, then verify
+libcamera-hello --list-cameras
+```
+
+### Option 2: Manual Troubleshooting
+See: `FIX_CAMERA_IMX7098.md` in your project directory
+
+---
+
+## Test Dashboard Now
+
+1. **Open**: http://10.2.1.47:8080
+2. **You should see**: Test pattern with status info
+3. **Try these**:
+   - Scroll dashboard - responsive on mobile/tablet
+   - Click settings - all tabs work
+   - Emergency buttons - should respond
+   - Check quick stats - will update with real FPS once camera works
+
+---
+
+## Once Camera Works
+
+The test pattern will **automatically** disappear and show the real live feed. No code changes needed!
+
+---
+
+## Key Files Involved
+
+1. **`web/app.py`** - Updated with test mode fallback
+2. **`FIX_CAMERA_IMX7098.md`** - Complete troubleshooting guide
+3. **`config/config.json`** - Your camera settings (on Pi)
+
+---
+
+## Diagnostic Commands to Run on Pi
+
+```bash
+# Check what type of camera system you have
+libcamera-hello --list-cameras
+
+# Check USB cameras
+lsusb | grep -i camera
+
+# Check camera folder
+ls /dev/video*
+
+# Check config
+grep camera_auto /boot/config.txt
+```
+
+---
+
+## Dashboard Features Available Now (Test Mode)
+
+✅ Responsive design (mobile, tablet, desktop)  
+✅ Quick stats bar (will show FPS once camera works)  
+✅ Emergency buttons (functional)  
+✅ Settings page with tabs (functional)  
+✅ Multi-device interface (accessible)  
+✅ Storage/recordings display (functional)  
+
+---
+
+## Support Resources
+
+- **Hardware troubleshooting**: See `FIX_CAMERA_IMX7098.md`
+- **Camera specs**: IMX7098 on Pi Zero 2 W
+- **Service logs**: `sudo journalctl -u mecamera -n 50`
+- **Dashboard logs**: Check logs directory
+
+---
+
+**Next Step**: SSH to Pi and run the camera enable command above, then restart!

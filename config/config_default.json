@@ -15,6 +15,29 @@
     "recording_resolution": "1280x720",
     "recording_duration": 30,
     "stream_fps": 15,
+    "stream_quality": "standard",
+    "quality_options": {
+      "low": {
+        "resolution": "320x240",
+        "fps": 10,
+        "bitrate": "500k"
+      },
+      "standard": {
+        "resolution": "640x480",
+        "fps": 15,
+        "bitrate": "1000k"
+      },
+      "high": {
+        "resolution": "1280x720",
+        "fps": 25,
+        "bitrate": "2500k"
+      },
+      "ultra": {
+        "resolution": "1920x1080",
+        "fps": 30,
+        "bitrate": "5000k"
+      }
+    },
     "use_fast_streamer": true,
     "motion_check_interval": 0.2
   },

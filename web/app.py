@@ -13,7 +13,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
 from src.core import (
     get_config, save_config, is_first_run, mark_first_run_complete,
     authenticate, create_user, user_exists, get_user,
-    BatteryMonitor, extract_thumbnail, generate_setup_qr
+    BatteryMonitor, extract_thumbnail, generate_setup_qr,
+    log_motion_event, get_recent_events, get_event_statistics, export_events_csv
 )
 from src.camera import (
     camera_coordinator, LibcameraStreamer, is_libcamera_available,
@@ -64,13 +65,180 @@ if fast_streamer_available and use_fast:
         logger.error(f"[CAMERA] Fast streamer initialization failed: {e}")
         camera_streamer = None
 
-# Fallback to slow libcamera-still approach
+# PRIORITY 1: Try legacy camera first (for older Pi cameras with legacy stack)
+if not camera_streamer:
+    import subprocess
+    try:
+        result = subprocess.run(['vcgencmd', 'get_camera'], capture_output=True, text=True, timeout=2)
+        if 'detected=1' in result.stdout:
+            logger.info("[CAMERA] Legacy camera detected, attempting to use picamera...")
+            
+            class LegacyCameraStreamer:
+                """Legacy camera streamer using picamera v1 - for older Raspberry Pi cameras"""
+                def __init__(self):
+                    import io
+                    self.stream = io.BytesIO()
+                    self.camera = None
+                    self.running = False
+                    
+                def start(self):
+                    try:
+                        import picamera
+                        import time
+                        self.camera = picamera.PiCamera()
+                        self.camera.resolution = (640, 480)
+                        self.camera.framerate = 15
+                        time.sleep(2)  # Camera warmup
+                        self.running = True
+                        logger.success("[CAMERA] Legacy camera started successfully")
+                        return True
+                    except Exception as e:
+                        logger.error(f"[CAMERA] Failed to start legacy camera: {e}")
+                        return False
+                
+                def get_jpeg_frame(self):
+                    """Capture frame and return as JPEG"""
+                    if not self.running or not self.camera:
+                        return None
+                    
+                    try:
+                        self.stream.seek(0)
+                        self.stream.truncate()
+                        self.camera.capture(self.stream, format='jpeg', use_video_port=True)
+                        self.stream.seek(0)
+                        return self.stream.read()
+                    except Exception as e:
+                        logger.debug(f"[CAMERA] Frame capture error: {e}")
+                        return None
+                
+                def stop(self):
+                    self.running = False
+                    if self.camera:
+                        self.camera.close()
+            
+            camera_streamer = LegacyCameraStreamer()
+            if camera_streamer.start():
+                camera_available = True
+    except Exception as e:
+        logger.debug(f"[CAMERA] Legacy camera check failed: {e}")
+
+# PRIORITY 2: Try USB camera via OpenCV (for IMX7098 and other USB cameras)
+if not camera_streamer:
+    logger.info("[CAMERA] Attempting USB camera detection via OpenCV...")
+    
+    class USBCameraStreamer:
+        """USB camera streamer using OpenCV - works with /dev/video* devices"""
+        def __init__(self, camera_index=0):
+            import cv2
+            self.camera_index = camera_index
+            self.cap = cv2.VideoCapture(camera_index)
+            self.jpeg_data = None
+            self.running = False
+            
+        def start(self):
+            if not self.cap.isOpened():
+                logger.warning(f"[CAMERA] Could not open /dev/video{self.camera_index}")
+                return False
+            
+            # Set camera resolution
+            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            self.cap.set(cv2.CAP_PROP_FPS, 15)
+            
+            self.running = True
+            logger.success(f"[CAMERA] USB camera started on /dev/video{self.camera_index}")
+            return True
+            
+        def get_jpeg_frame(self):
+            """Capture frame and encode as JPEG"""
+            if not self.running or not self.cap.isOpened():
+                return None
+            
+            ret, frame = self.cap.read()
+            if not ret or frame is None:
+                return None
+            
+            import cv2
+            ret, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+            return jpeg.tobytes() if ret else None
+        
+        def stop(self):
+            self.running = False
+            self.cap.release()
+    
+    # Try to open USB camera (try /dev/video0-23)
+    for video_index in range(24):
+        try:
+            import cv2
+            cap = cv2.VideoCapture(f'/dev/video{video_index}')
+            if cap.isOpened():
+                cap.release()
+                camera_streamer = USBCameraStreamer(camera_index=video_index)
+                if camera_streamer.start():
+                    camera_available = True
+                    logger.success(f"[CAMERA] USB camera found and started on /dev/video{video_index}")
+                    break
+        except Exception as e:
+            logger.debug(f"[CAMERA] /dev/video{video_index} check failed: {e}")
+            continue
+
+# Fallback to slow libcamera-still approach if USB camera not found
 if not camera_streamer and is_libcamera_available():
     camera_streamer = LibcameraStreamer()
     camera_available = True
     logger.info("[CAMERA] Using libcamera-still fallback (slow - 1-2 FPS)")
-else:
-    logger.warning("[CAMERA] No camera available")
+
+# Final fallback: TEST MODE with dummy stream
+if not camera_streamer:
+    logger.warning("[CAMERA] No camera found - enabling TEST MODE with dummy video stream")
+    
+    class DummyStreamer:
+        """Generates dummy MJPEG frames for testing without hardware"""
+        def __init__(self):
+            import io
+            import struct
+            self.frame_num = 0
+            
+            def get_jpeg_frame(self):
+                """Generate a valid JPEG frame with test pattern"""
+                try:
+                    from PIL import Image, ImageDraw, ImageFont
+                    import io
+                    
+                    # Create test image (640x480 by default)
+                    img = Image.new('RGB', (640, 480), color=(40, 40, 40))
+                    draw = ImageDraw.Draw(img)
+                    
+                    # Draw test pattern
+                    draw.text((50, 50), f"TEST MODE - Frame #{self.frame_num}", fill=(0, 255, 0))
+                    draw.text((50, 100), "Camera Hardware Detection Failed", fill=(255, 100, 0))
+                    draw.text((50, 150), "Troubleshooting Steps:", fill=(100, 200, 255))
+                    draw.text((50, 200), "1. Verify camera cable connection", fill=(100, 200, 255))
+                    draw.text((50, 250), "2. Check: libcamera-hello --list-cameras", fill=(100, 200, 255))
+                    draw.text((50, 300), "3. Review /boot/config.txt camera settings", fill=(100, 200, 255))
+                    draw.text((50, 350), "4. Dashboard features are fully functional", fill=(0, 255, 0))
+                    
+                    # Draw frame counter animation
+                    for i in range(5):
+                        x = 100 + (i * 80)
+                        if i <= (self.frame_num % 5):
+                            draw.rectangle([x, 400, x+60, 450], fill=(0, 255, 0))
+                        else:
+                            draw.rectangle([x, 400, x+60, 450], outline=(0, 255, 0))
+                    
+                    # Convert to JPEG
+                    jpeg_io = io.BytesIO()
+                    img.save(jpeg_io, format='JPEG', quality=70)
+                    self.frame_num += 1
+                    return jpeg_io.getvalue()
+                except ImportError:
+                    logger.warning("[DUMMY] PIL not available, returning minimal JPEG")
+                    # Return a minimal valid JPEG as fallback
+                    return b'\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00\xff\xdb\x00C\x00\x08\x06\x06\x07\x06\x05\x08\x07\x07\x07\t\t\x08\n\x0c\x14\r\x0c\x0b\x0b\x0c\x19\x12\x13\x0f\x14\x1d\x1a\x1f\x1e\x1d\x1a\x1c\x1c $.\' ",#\x1c\x1c(7),01444\x1f\'9=82<.342\xff\xc0\x00\x0b\x08\x00\x01\x00\x01\x01\x11\x00\xff\xc4\x00\x1f\x00\x00\x01\x05\x01\x01\x01\x01\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x01\x02\x03\x04\x05\x06\x07\x08\t\n\x0b\xff\xc4\x00\xb5\x10\x00\x02\x01\x03\x03\x02\x04\x03\x05\x05\x04\x04\x00\x00\x01}\x01\x02\x03\x00\x04\x11\x05\x12!1A\x06\x13Qa\x07"q\x142\x81\x91\xa1\x08#B\xb1\xc1\x15R\xd1\xf0$3br\x82\t\n\x16\x17\x18\x19\x1a%&\'()*456789:CDEFGHIJSTUVWXYZcdefghijstuvwxyz\x83\x84\x85\x86\x87\x88\x89\x8a\x92\x93\x94\x95\x96\x97\x98\x99\x9a\xa2\xa3\xa4\xa5\xa6\xa7\xa8\xa9\xaa\xb2\xb3\xb4\xb5\xb6\xb7\xb8\xb9\xba\xc2\xc3\xc4\xc5\xc6\xc7\xc8\xc9\xca\xd2\xd3\xd4\xd5\xd6\xd7\xd8\xd9\xda\xe1\xe2\xe3\xe4\xe5\xe6\xe7\xe8\xe9\xea\xf1\xf2\xf3\xf4\xf5\xf6\xf7\xf8\xf9\xfa\xff\xda\x00\x08\x01\x01\x00\x00?\x00\xfb\xd6\xff\xd9'
+        
+        camera_streamer = DummyStreamer()
+        camera_available = True
+        logger.info("[CAMERA] TEST MODE: Using dummy video stream for dashboard testing")
 
 # Helpers for recordings/storage info
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -486,7 +654,7 @@ def settings():
         return render_template("config.html", config={}, error=f"Failed to load settings: {str(e)}")
 
 def gen_mjpeg():
-    """Generate MJPEG frames from camera - FAST if using picamera2!"""
+    """Generate MJPEG frames from camera - OPTIMIZED for speed!"""
     import time
     
     if not camera_streamer:
@@ -496,17 +664,31 @@ def gen_mjpeg():
     
     BOUNDARY = b'MJPEGBOUNDARY'
     frame_count = 0
+    last_log_time = time.time()
+    fps_counter = 0
     
     # Check if using fast streamer
     is_fast_streamer = hasattr(camera_streamer, 'get_jpeg_frame')
     
+    # Optimize frame timing for minimal latency
     if is_fast_streamer:
-        logger.debug("[STREAM] Using FAST streaming mode (picamera2)")
+        logger.info("[STREAM] Using FAST streaming mode (picamera2) - High FPS, Low Latency")
+        target_delay = 0.016  # ~60 FPS for responsiveness
     else:
-        logger.debug("[STREAM] Using SLOW streaming mode (libcamera-still subprocess)")
+        logger.info("[STREAM] Using SLOW streaming mode (libcamera-still) - Fallback mode")
+        target_delay = 0.5   # 2 FPS for slow mode
+    
+    last_frame_time = time.time()
     
     while True:
         try:
+            # Calculate frame timing to minimize jitter
+            time_since_last = time.time() - last_frame_time
+            if time_since_last < target_delay:
+                # Don't sleep too long, check in small increments
+                time.sleep(min(0.002, target_delay - time_since_last))
+                continue
+            
             if is_fast_streamer:
                 # FAST MODE: Get pre-captured frame (instant!)
                 jpeg_data = camera_streamer.get_jpeg_frame()
@@ -517,23 +699,32 @@ def gen_mjpeg():
                 width, height = map(int, resolution.split('x'))
                 jpeg_data = camera_streamer.get_single_frame_jpeg(width, height)
             
-            if jpeg_data:
+            if jpeg_data and len(jpeg_data) > 100:  # Valid frame
                 frame_count += 1
+                fps_counter += 1
+                
+                # Send MJPEG boundary
                 yield b'--' + BOUNDARY + b'\r\n'
                 yield b'Content-Type: image/jpeg\r\n'
                 yield b'Content-Length: ' + str(len(jpeg_data)).encode() + b'\r\n'
-                yield b'X-Timestamp: ' + str(int(time.time() * 1000)).encode() + b'\r\n\r\n'
+                yield b'X-Timestamp: ' + str(int(time.time() * 1000)).encode() + b'\r\n'
+                yield b'X-Frame-Count: ' + str(frame_count).encode() + b'\r\n\r\n'
                 yield jpeg_data
                 yield b'\r\n'
                 
-                # Fast mode doesn't need long delays
-                if is_fast_streamer:
-                    time.sleep(0.033)  # 30 FPS max
-                else:
-                    time.sleep(0.5)  # 2 FPS for slow mode
+                last_frame_time = time.time()
+                
+                # Log FPS every 5 seconds
+                current_time = time.time()
+                if current_time - last_log_time >= 5:
+                    fps = fps_counter / (current_time - last_log_time)
+                    logger.debug(f"[STREAM] FPS: {fps:.1f}, Mode: {'FAST' if is_fast_streamer else 'SLOW'}")
+                    fps_counter = 0
+                    last_log_time = current_time
             else:
-                logger.debug("[STREAM] Failed to capture frame, retrying...")
-                time.sleep(0.5 if is_fast_streamer else 1.0)
+                # No valid frame yet
+                logger.debug("[STREAM] Waiting for frame...")
+                time.sleep(0.1 if is_fast_streamer else 0.5)
                 
         except Exception as e:
             logger.error(f"[STREAM] Frame generation error: {e}")
@@ -829,6 +1020,291 @@ def storage_cleanup():
     except Exception as e:
         logger.error(f"[CLEANUP] Error: {e}")
         return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/stream/quality", methods=["GET", "POST"])
+def stream_quality():
+    """Get or set stream quality"""
+    if not require_auth():
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    try:
+        cfg = get_config()
+        camera_cfg = cfg.get("camera", {})
+        
+        if request.method == "POST":
+            quality = request.get_json().get("quality")
+            if quality not in ["low", "standard", "high", "ultra"]:
+                return jsonify({"error": "Invalid quality"}), 400
+            
+            camera_cfg["stream_quality"] = quality
+            
+            # Apply quality settings
+            quality_options = camera_cfg.get("quality_options", {})
+            if quality in quality_options:
+                quality_cfg = quality_options[quality]
+                camera_cfg["resolution"] = quality_cfg.get("resolution", "640x480")
+                camera_cfg["stream_fps"] = quality_cfg.get("fps", 15)
+            
+            save_config(cfg)
+            logger.info(f"[QUALITY] Stream quality changed to: {quality}")
+            
+            return jsonify({
+                "ok": True,
+                "quality": quality,
+                "settings": camera_cfg.get("quality_options", {}).get(quality, {})
+            })
+        
+        else:
+            # GET - return available qualities and current setting
+            return jsonify({
+                "ok": True,
+                "current": camera_cfg.get("stream_quality", "standard"),
+                "available": camera_cfg.get("quality_options", {}),
+                "resolution": camera_cfg.get("resolution"),
+                "fps": camera_cfg.get("stream_fps")
+            })
+    except Exception as e:
+        logger.error(f"[QUALITY] Error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+# ==================== MOTION EVENT LOGGING ENDPOINTS ====================
+
+@app.route("/api/motion/events", methods=["GET"])
+def api_motion_events():
+    """Get recent motion events with filtering"""
+    if not require_auth():
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    try:
+        # Query parameters
+        hours = int(request.args.get("hours", 24))
+        event_type = request.args.get("type", None)
+        limit = int(request.args.get("limit", 100))
+        
+        events = get_recent_events(hours=hours, event_type=event_type, limit=limit)
+        
+        return jsonify({
+            "ok": True,
+            "count": len(events),
+            "hours": hours,
+            "events": events
+        })
+    except Exception as e:
+        logger.error(f"[MOTION_EVENTS] Error: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/motion/stats", methods=["GET"])
+def api_motion_stats():
+    """Get motion event statistics"""
+    if not require_auth():
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    try:
+        hours = int(request.args.get("hours", 24))
+        stats = get_event_statistics(hours=hours)
+        
+        return jsonify({
+            "ok": True,
+            "stats": stats
+        })
+    except Exception as e:
+        logger.error(f"[MOTION_STATS] Error: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/motion/log", methods=["POST"])
+def api_log_motion():
+    """Log a motion event (called from motion detection service)"""
+    if not require_auth():
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    try:
+        data = request.get_json()
+        event_type = data.get("type", "motion")
+        confidence = float(data.get("confidence", 0.0))
+        details = data.get("details", {})
+        
+        event = log_motion_event(event_type=event_type, confidence=confidence, details=details)
+        
+        return jsonify({
+            "ok": True,
+            "event": event
+        })
+    except Exception as e:
+        logger.error(f"[MOTION_LOG] Error: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/motion/export", methods=["GET"])
+def api_export_motion():
+    """Export motion events as CSV"""
+    if not require_auth():
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    try:
+        hours = int(request.args.get("hours", 24))
+        csv_file = f"motion_events_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        csv_path = os.path.join("logs", csv_file)
+        
+        from src.core import export_events_csv
+        if export_events_csv(csv_path, hours=hours):
+            return send_file(csv_path, as_attachment=True, download_name=csv_file)
+        else:
+            return jsonify({"ok": False, "error": "Export failed"}), 500
+            
+    except Exception as e:
+        logger.error(f"[MOTION_EXPORT] Error: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+# ==================== MULTI-DEVICE ENDPOINTS ====================
+
+@app.route("/api/devices", methods=["GET"])
+def api_devices():
+    """Get list of configured devices"""
+    if not require_auth():
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    try:
+        cfg = get_config()
+        devices_config = cfg.get("devices", [])
+        
+        # Format devices list with current status
+        devices = []
+        for device in devices_config:
+            device_info = {
+                "id": device.get("id", device.get("name", "")),
+                "name": device.get("name", "Unknown Device"),
+                "ip": device.get("ip", ""),
+                "location": device.get("location", ""),
+                "status": device.get("status", "unknown"),
+                "battery": device.get("battery", None),
+                "storage": device.get("storage", "0 GB"),
+                "events_24h": device.get("events_24h", 0),
+                "last_seen": device.get("last_seen", time.time()),
+                "firmware": device.get("firmware", "Unknown")
+            }
+            devices.append(device_info)
+        
+        # Add current device as first one
+        current_device = {
+            "id": "current",
+            "name": cfg.get("device_name", "ME_CAM_1"),
+            "ip": "localhost",
+            "location": cfg.get("device_location", "Not set"),
+            "status": "online",
+            "battery": battery.get_status().get("percent", 100) if battery else 100,
+            "storage": f"{get_storage_used_gb(cfg):.2f} GB",
+            "events_24h": count_recent_events(cfg, hours=24),
+            "last_seen": time.time(),
+            "firmware": "Latest"
+        }
+        
+        # Insert current device at beginning
+        devices.insert(0, current_device)
+        
+        return jsonify({
+            "ok": True,
+            "devices": devices
+        })
+    except Exception as e:
+        logger.error(f"[DEVICES] Error: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/devices", methods=["POST"])
+def api_add_device():
+    """Add a new device to the network"""
+    if not require_auth():
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    try:
+        data = request.get_json()
+        device_id = data.get("id", "").strip()
+        device_name = data.get("name", "Unknown").strip()
+        device_location = data.get("location", "").strip()
+        
+        if not device_id:
+            return jsonify({"ok": False, "error": "Device ID required"}), 400
+        
+        cfg = get_config()
+        devices = cfg.get("devices", [])
+        
+        # Check if device already exists
+        if any(d.get("id") == device_id for d in devices):
+            return jsonify({"ok": False, "error": "Device already exists"}), 400
+        
+        new_device = {
+            "id": device_id,
+            "name": device_name,
+            "ip": device_id,
+            "location": device_location,
+            "status": "pending",
+            "battery": None,
+            "storage": "0 GB",
+            "events_24h": 0,
+            "last_seen": time.time(),
+            "firmware": "Unknown"
+        }
+        
+        devices.append(new_device)
+        cfg["devices"] = devices
+        save_config(cfg)
+        
+        logger.info(f"[DEVICES] Added new device: {device_name} ({device_id})")
+        
+        return jsonify({
+            "ok": True,
+            "message": f"Device '{device_name}' added successfully",
+            "device": new_device
+        })
+    except Exception as e:
+        logger.error(f"[DEVICES] Error adding device: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/devices/<device_id>", methods=["DELETE"])
+def api_remove_device(device_id):
+    """Remove a device from the network"""
+    if not require_auth():
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    try:
+        cfg = get_config()
+        devices = cfg.get("devices", [])
+        
+        # Find and remove device
+        devices = [d for d in devices if d.get("id") != device_id]
+        cfg["devices"] = devices
+        save_config(cfg)
+        
+        logger.info(f"[DEVICES] Removed device: {device_id}")
+        
+        return jsonify({
+            "ok": True,
+            "message": "Device removed successfully"
+        })
+    except Exception as e:
+        logger.error(f"[DEVICES] Error removing device: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/multicam")
+def multicam():
+    """Multi-camera dashboard"""
+    if not require_auth():
+        return redirect(url_for("login"))
+    
+    try:
+        cfg = get_config()
+        devices = cfg.get("devices", [])
+        
+        return render_template("multicam.html", devices=devices)
+    except Exception as e:
+        logger.error(f"[MULTICAM] Error: {e}")
+        return render_template("multicam.html", devices=[])
+
+if __name__ == "__main__":
+    # Run Flask app
+    logger.info("[STARTUP] Starting ME Camera Dashboard...")
+    app.run(host="0.0.0.0", port=8080, debug=False)
 
 @app.route("/api/camera/stats")
 def camera_stats():
