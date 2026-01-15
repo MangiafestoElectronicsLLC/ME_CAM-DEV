@@ -115,20 +115,11 @@
         </div>
         <div class="modal-body">
           <div class="tab-buttons">
-            <button class="tab-btn active" onclick="switchTab('qr')">📱 Scan QR Code</button>
-            <button class="tab-btn" onclick="switchTab('manual')">✏️ Manual Entry</button>
-          </div>
-
-          <!-- QR Code Tab -->
-          <div id="qrTab" class="tab-content active">
-            <div id="qrScanner"
-              style="width: 100%; height: 300px; background: #000; border-radius: 8px; margin: 20px 0; display: flex; align-items: center; justify-content: center; color: #666;">
-              <p>QR Scanner (requires camera permission)</p>
-            </div>
+            <button class="tab-btn active" onclick="switchTab('manual')">✏️ Manual Entry</button>
           </div>
 
           <!-- Manual Entry Tab -->
-          <div id="manualTab" class="tab-content" style="display: none;">
+          <div id="manualTab" class="tab-content active">
             <div class="form-group">
               <label>Device ID / IP Address</label>
               <input type="text" id="deviceId" placeholder="192.168.1.100 or device-id" class="form-input">
@@ -414,12 +405,39 @@
     }
 
     function saveDevice() {
-      const deviceId = document.getElementById('deviceId').value;
+      const deviceId = document.getElementById('deviceId').value.trim();
+      const deviceName = document.getElementById('deviceName').value.trim();
+      const deviceLocation = document.getElementById('deviceLocation').value.trim();
+
       if (!deviceId) {
         alert('Please enter a device ID or IP address');
         return;
       }
-      alert('Device added! (Feature in development)');
+
+      // POST to API
+      fetch('/api/devices', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: deviceId,
+          name: deviceName || 'Camera',
+          location: deviceLocation
+        })
+      })
+        .then(r => r.json())
+        .then(data => {
+          if (data.ok) {
+            alert('Device added successfully!');
+            location.reload();
+          } else {
+            alert('Error: ' + (data.error || 'Unknown error'));
+          }
+        })
+        .catch(e => {
+          alert('Error adding device: ' + e.message);
+          console.error(e);
+        });
+
       closeAddDeviceModal();
     }
 

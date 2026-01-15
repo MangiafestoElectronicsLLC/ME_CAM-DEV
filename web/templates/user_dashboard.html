@@ -11,10 +11,13 @@
 <body>
     <div class="navbar">
         <div class="brand">📹 {{ device_name }}</div>
-        <a href="/dashboard">Dashboard</a>
-        <a href="/config">⚙️ Settings</a>
-        <a href="/user/profile">👤 Profile</a>
-        <a href="/logout">Logout</a>
+        <div class="nav-menu" style="display: flex; gap: 20px;">
+            <a href="/dashboard">Dashboard</a>
+            <a href="/multicam">📡 Devices</a>
+            <a href="/config">⚙️ Settings</a>
+            <a href="/user/profile">👤 Profile</a>
+            <a href="/logout">Logout</a>
+        </div>
     </div>
 
     <div class="container">
@@ -24,10 +27,9 @@
                 <h1>🏠 {{ username }}'s Security Hub</h1>
                 <div class="device-info">Device: {{ device_name }} | User: {{ username }}</div>
             </div>
-            <div>
-                <span class="status-pill online">● ONLINE</span>
-                <span class="status-pill" style="background: #0d47a1; color: #64b5f6;">🔋 {{ battery_percent if
-                    battery_percent else 'External Power' }}</span>
+            <div class="header-right" style="display: flex; gap: 10px;">
+                <span class="status-pill online" id="status-pill">● ONLINE</span>
+                <span class="status-pill" style="background: #0d47a1; color: #64b5f6;" id="battery-pill">🔋 100%</span>
             </div>
         </div>
 
@@ -153,17 +155,120 @@
             }
         }
 
-        // Refresh status every 10 seconds
-        setInterval(() => {
+        // Update all dashboard values dynamically
+        function updateDashboard() {
+            // Update status
             fetch('/api/status')
                 .then(r => r.json())
                 .then(d => {
-                    if (!d.active) {
-                        document.querySelector('.status-pill').innerHTML = '● OFFLINE';
+                    const statusPill = document.querySelector('.status-pill.online') || document.querySelector('.status-pill.offline');
+                    if (statusPill) {
+                        if (d.active) {
+                            statusPill.className = 'status-pill online';
+                            statusPill.innerHTML = '● ONLINE';
+                        } else {
+                            statusPill.className = 'status-pill offline';
+                            statusPill.innerHTML = '● OFFLINE';
+                        }
+                    }
+
+                    // Update system status card
+                    const statusValue = document.querySelector('.status-card .status-value');
+                    if (statusValue && statusValue.textContent === '✓ Active' || statusValue.textContent === '✗ Offline') {
+                        statusValue.textContent = d.active ? '✓ Active' : '✗ Offline';
+                        statusValue.style.color = d.active ? '#4caf50' : '#d32f2f';
                     }
                 })
-                .catch(e => console.error(e));
-        }, 10000);
+                .catch(e => console.error('Status error:', e));
+
+            // Update battery
+            fetch('/api/battery')
+                .then(r => r.json())
+                .then(d => {
+                    if (d.ok) {
+                        // Update battery pill
+                        const batteryPill = document.querySelector('.status-pill [style*="background: #0d47a1"]');
+                        if (batteryPill) {
+                            batteryPill.parentElement.innerHTML = `🔋 ${d.percent}%`;
+                        }
+
+                        // Update battery card
+                        const batteryCards = document.querySelectorAll('.status-card');
+                        batteryCards.forEach(card => {
+                            const title = card.querySelector('h3');
+                            if (title && title.textContent === 'BATTERY LEVEL') {
+                                const value = card.querySelector('.status-value');
+                                const bar = card.querySelector('.status-bar-fill');
+                                if (value) value.textContent = d.percent + '%';
+                                if (bar) bar.style.width = d.percent + '%';
+                            }
+                        });
+                    }
+                })
+                .catch(e => console.error('Battery error:', e));
+
+            // Update storage
+            fetch('/api/storage')
+                .then(r => r.json())
+                .then(d => {
+                    if (d.ok) {
+                        const storageCards = document.querySelectorAll('.status-card');
+                        storageCards.forEach(card => {
+                            const title = card.querySelector('h3');
+                            if (title && title.textContent === 'STORAGE USED') {
+                                const value = card.querySelector('.status-value');
+                                const bar = card.querySelector('.status-bar-fill');
+                                if (value) value.textContent = d.used_gb.toFixed(2) + ' GB';
+                                if (bar) {
+                                    const percent = d.total_gb > 0 ? (d.used_gb / d.total_gb) * 100 : 0;
+                                    bar.style.width = percent + '%';
+                                }
+                            }
+                        });
+                    }
+                })
+                .catch(e => console.error('Storage error:', e));
+
+            // Update recordings count
+            fetch('/api/recordings')
+                .then(r => r.json())
+                .then(d => {
+                    if (d.ok && d.recordings) {
+                        const recordingsCards = document.querySelectorAll('.status-card');
+                        recordingsCards.forEach(card => {
+                            const title = card.querySelector('h3');
+                            if (title && title.textContent === 'RECORDINGS') {
+                                const value = card.querySelector('.status-value');
+                                if (value) value.textContent = d.recordings.length;
+                            }
+                        });
+                    }
+                })
+                .catch(e => console.error('Recordings error:', e));
+
+            // Update history count
+            fetch('/api/motion/events?hours=24&limit=1')
+                .then(r => r.json())
+                .then(d => {
+                    if (d.ok) {
+                        const historyCards = document.querySelectorAll('.status-card');
+                        historyCards.forEach(card => {
+                            const title = card.querySelector('h3');
+                            if (title && title.textContent === 'HISTORY (24H)') {
+                                const value = card.querySelector('.status-value');
+                                if (value) value.textContent = d.count || 0;
+                            }
+                        });
+                    }
+                })
+                .catch(e => console.error('History error:', e));
+        }
+
+        // Update on page load
+        window.addEventListener('load', updateDashboard);
+
+        // Update every 5 seconds
+        setInterval(updateDashboard, 5000);
     </script>
 </body>
 

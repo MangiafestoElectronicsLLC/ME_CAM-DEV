@@ -170,7 +170,7 @@
                     <div class="camera-feed-container">
                         <div id="liveStreamContainer" class="camera-feed">
                             <img id="liveStream" src="/api/stream"
-                                style="width: 100%; height: 100%; object-fit: cover; display: block;"
+                                style="width: 100%; height: 100%; object-fit: contain; display: block; background: #1a1a1a;"
                                 onload="onStreamLoad()" onerror="onStreamError();">
                             <div id="streamSpinner" class="spinner" style="display: none;"></div>
                         </div>
@@ -363,6 +363,13 @@
             document.getElementById('streamStatus').textContent = '🟢 Live';
             frameCount++;
             updateFPS();
+
+            // Reload stream every 100ms to refresh TEST MODE frames
+            if (!streamPaused) {
+                setTimeout(() => {
+                    document.getElementById('liveStream').src = '/api/stream?t=' + Date.now();
+                }, 100);
+            }
         }
 
         function onStreamError() {
@@ -407,6 +414,8 @@
             refreshRecordings();
             updateSystemStatus();
             setInterval(updateUptime, 60000);
+            setInterval(updateSystemStatus, 5000); // Update status every 5 seconds
+            setInterval(refreshRecordings, 30000); // Refresh recordings every 30 seconds
             updateUptime();
         });
 
@@ -422,9 +431,43 @@
                     if (data && data.active !== undefined) {
                         const online = data.active;
                         document.getElementById('streamStatus').textContent = online ? '🟢 Live' : '🔴 Offline';
+
+                        // Update header status pill
+                        const statusPills = document.querySelectorAll('.status-pill.online, .status-pill.offline');
+                        statusPills.forEach(pill => {
+                            if (pill.classList.contains('online') || pill.classList.contains('offline')) {
+                                pill.remove();
+                            }
+                        });
+
+                        const headerRight = document.querySelector('.header-right');
+                        const statusSpan = document.createElement('span');
+                        statusSpan.className = 'status-pill ' + (online ? 'online' : 'offline');
+                        statusSpan.textContent = (online ? '● ONLINE' : '● OFFLINE');
+                        headerRight.insertBefore(statusSpan, headerRight.firstChild);
+
+                        // Update status card
+                        const statusCard = document.querySelector('.status-card-value');
+                        if (statusCard) {
+                            if (online) {
+                                statusCard.innerHTML = '<span style="color: #81c784;">✓ Active</span>';
+                            } else {
+                                statusCard.innerHTML = '<span style="color: #ef5350;">✗ Offline</span>';
+                            }
+                        }
                     }
                 })
                 .catch(e => console.error('Status update error:', e));
+
+            // Also update battery status
+            fetch('/api/battery')
+                .then(r => r.json())
+                .then(data => {
+                    if (data.ok) {
+                        document.getElementById('battery-display').textContent = data.percent + '%';
+                    }
+                })
+                .catch(e => console.error('Battery update error:', e));
         }
 
         function refreshRecordings(sortBy = 'date-desc') {

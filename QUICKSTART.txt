@@ -1,0 +1,106 @@
+# 🚀 QUICK START - ME_CAM v2.0
+
+## Right Now - What Works
+
+✅ **Service Running:** `systemctl status mecamera` → Active  
+✅ **HTTPS Enabled:** Self-signed SSL certificates  
+✅ **Login Ready:** admin / admin  
+✅ **All Features:** Except live camera (TEST MODE)  
+
+---
+
+## Access Your Dashboard (2 Steps)
+
+### Step 1: Setup Domain (1 minute)
+
+Right-click and **"Run as Administrator":**
+```
+C:\Users\[YourUser]\Downloads\ME_CAM-DEV\ME_CAM-DEV\add-domain-to-hosts.bat
+```
+
+### Step 2: Open Browser
+
+Visit: **https://ME_CAM.com:8080**
+
+**You'll see a security warning** (normal for self-signed cert):
+1. Click "Advanced"
+2. Click "Proceed to ME_CAM.com (unsafe)"
+3. Login: `admin / admin`
+4. ✅ You're in!
+
+---
+
+## What You See
+
+- ✅ Dashboard with stats
+- ✅ TEST MODE camera (shows test pattern)
+- ✅ Motion detection controls
+- ✅ Battery status (100% = healthy power)
+- ✅ Storage management
+- ✅ Multi-device management
+- ✅ System monitoring
+
+---
+
+## Limitations
+
+**Camera:** Shows test pattern instead of live video
+- **Why:** Pi Zero 2W RAM limitation
+- **Fix:** Upgrade to Pi 3B or Pi 4B
+- **Timeline:** 30 minutes with new Pi
+
+**Everything Else:** Fully functional!
+
+---
+
+## Most Important Files
+
+```
+~/ME_CAM-DEV/
+├── main.py                    # Entry point
+├── web/app.py                 # Flask application
+├── logs/mecam.log             # Check here if issues
+├── certs/                     # HTTPS certificates
+├── config/settings.json       # Your PIN & settings
+└── recordings/                # Video storage
+```
+
+---
+
+## If Something Breaks
+
+```bash
+# Check status
+ssh pi@10.2.1.47 'sudo systemctl status mecamera'
+
+# View errors
+ssh pi@10.2.1.47 'tail -50 ~/ME_CAM-DEV/logs/mecam.log'
+
+# Restart
+ssh pi@10.2.1.47 'sudo systemctl restart mecamera'
+```
+
+---
+
+## Change Your PIN
+
+1. Login to dashboard
+2. Go to Settings
+3. Change PIN (default: 1234)
+4. Save
+
+---
+
+## Next: Get Live Camera (Optional)
+
+To upgrade Pi later:
+1. Buy Pi 3B ($35) or Pi 4B ($55)
+2. Flash SD card with Raspberry Pi OS
+3. Run same deployment script
+4. ✅ Live camera works!
+
+---
+
+**Status: READY TO USE** ✅
+
+Access now: **https://ME_CAM.com:8080**

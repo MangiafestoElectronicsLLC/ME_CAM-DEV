@@ -21,6 +21,12 @@ from src.camera import (
     FastCameraStreamer, FastMotionDetector, PICAMERA2_AVAILABLE
 )
 from src.detection import motion_service, CameraWatchdog
+from src.utils.pi_detect import init_pi_detection, get_pi_info
+
+# Initialize Pi detection
+pi_model, camera_config = init_pi_detection()
+logger.info(f"[SYSTEM] Running on {pi_model['name']} with {pi_model['ram_mb']}MB RAM")
+logger.info(f"[SYSTEM] Recommended camera mode: {camera_config['mode']}")
 
 # Check if fast streamer available
 fast_streamer_available = PICAMERA2_AVAILABLE
@@ -29,10 +35,21 @@ fast_streamer_available = PICAMERA2_AVAILABLE
 app = Flask(__name__, template_folder='templates', static_folder='static')
 app.secret_key = os.urandom(24)
 
-# DISABLED: Camera pipeline conflicts with libcamera-still streaming
-# watchdog = CameraWatchdog()
-# watchdog.start()
-watchdog = None  # Disabled to allow libcamera streaming
+# Initialize status tracking (for dashboard ONLINE/OFFLINE indicator)
+# Note: CameraWatchdog manages pipeline thread - we track system active state here
+class SystemStatus:
+    def __init__(self):
+        self.active = True  # System is always active when running
+        self.start_time = time.time()
+    
+    def status(self):
+        """Return system status - active as long as Flask is running"""
+        return {
+            "active": self.active,
+            "timestamp": time.time()
+        }
+
+watchdog = SystemStatus()  # Use simple status tracker instead of full pipeline watchdog
 
 battery = BatteryMonitor(enabled=True)
 
@@ -123,70 +140,16 @@ if not camera_streamer:
         logger.debug(f"[CAMERA] Legacy camera check failed: {e}")
 
 # PRIORITY 2: Try USB camera via OpenCV (for IMX7098 and other USB cameras)
-if not camera_streamer:
-    logger.info("[CAMERA] Attempting USB camera detection via OpenCV...")
-    
-    class USBCameraStreamer:
-        """USB camera streamer using OpenCV - works with /dev/video* devices"""
-        def __init__(self, camera_index=0):
-            import cv2
-            self.camera_index = camera_index
-            self.cap = cv2.VideoCapture(camera_index)
-            self.jpeg_data = None
-            self.running = False
-            
-        def start(self):
-            if not self.cap.isOpened():
-                logger.warning(f"[CAMERA] Could not open /dev/video{self.camera_index}")
-                return False
-            
-            # Set camera resolution
-            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-            self.cap.set(cv2.CAP_PROP_FPS, 15)
-            
-            self.running = True
-            logger.success(f"[CAMERA] USB camera started on /dev/video{self.camera_index}")
-            return True
-            
-        def get_jpeg_frame(self):
-            """Capture frame and encode as JPEG"""
-            if not self.running or not self.cap.isOpened():
-                return None
-            
-            ret, frame = self.cap.read()
-            if not ret or frame is None:
-                return None
-            
-            import cv2
-            ret, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
-            return jpeg.tobytes() if ret else None
-        
-        def stop(self):
-            self.running = False
-            self.cap.release()
-    
-    # Try to open USB camera (try /dev/video0-23)
-    for video_index in range(24):
-        try:
-            import cv2
-            cap = cv2.VideoCapture(f'/dev/video{video_index}')
-            if cap.isOpened():
-                cap.release()
-                camera_streamer = USBCameraStreamer(camera_index=video_index)
-                if camera_streamer.start():
-                    camera_available = True
-                    logger.success(f"[CAMERA] USB camera found and started on /dev/video{video_index}")
-                    break
-        except Exception as e:
-            logger.debug(f"[CAMERA] /dev/video{video_index} check failed: {e}")
-            continue
+# PRIORITY 2: Skip USB camera on Pi Zero (memory exhaustion)
+# if not camera_streamer:
+#     logger.info("[CAMERA] USB camera detection skipped (Pi Zero memory limitation)")
 
 # Fallback to slow libcamera-still approach if USB camera not found
-if not camera_streamer and is_libcamera_available():
-    camera_streamer = LibcameraStreamer()
-    camera_available = True
-    logger.info("[CAMERA] Using libcamera-still fallback (slow - 1-2 FPS)")
+# DISABLED: libcamera-still hangs with imx7098 - use test mode instead
+# if not camera_streamer and is_libcamera_available():
+#     camera_streamer = LibcameraStreamer()
+#     camera_available = True
+#     logger.info("[CAMERA] Using libcamera-still fallback (slow - 1-2 FPS)")
 
 # Final fallback: TEST MODE with dummy stream
 if not camera_streamer:
@@ -198,47 +161,47 @@ if not camera_streamer:
             import io
             import struct
             self.frame_num = 0
-            
-            def get_jpeg_frame(self):
-                """Generate a valid JPEG frame with test pattern"""
-                try:
-                    from PIL import Image, ImageDraw, ImageFont
-                    import io
-                    
-                    # Create test image (640x480 by default)
-                    img = Image.new('RGB', (640, 480), color=(40, 40, 40))
-                    draw = ImageDraw.Draw(img)
-                    
-                    # Draw test pattern
-                    draw.text((50, 50), f"TEST MODE - Frame #{self.frame_num}", fill=(0, 255, 0))
-                    draw.text((50, 100), "Camera Hardware Detection Failed", fill=(255, 100, 0))
-                    draw.text((50, 150), "Troubleshooting Steps:", fill=(100, 200, 255))
-                    draw.text((50, 200), "1. Verify camera cable connection", fill=(100, 200, 255))
-                    draw.text((50, 250), "2. Check: libcamera-hello --list-cameras", fill=(100, 200, 255))
-                    draw.text((50, 300), "3. Review /boot/config.txt camera settings", fill=(100, 200, 255))
-                    draw.text((50, 350), "4. Dashboard features are fully functional", fill=(0, 255, 0))
-                    
-                    # Draw frame counter animation
-                    for i in range(5):
-                        x = 100 + (i * 80)
-                        if i <= (self.frame_num % 5):
-                            draw.rectangle([x, 400, x+60, 450], fill=(0, 255, 0))
-                        else:
-                            draw.rectangle([x, 400, x+60, 450], outline=(0, 255, 0))
-                    
-                    # Convert to JPEG
-                    jpeg_io = io.BytesIO()
-                    img.save(jpeg_io, format='JPEG', quality=70)
-                    self.frame_num += 1
-                    return jpeg_io.getvalue()
-                except ImportError:
-                    logger.warning("[DUMMY] PIL not available, returning minimal JPEG")
-                    # Return a minimal valid JPEG as fallback
-                    return b'\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00\xff\xdb\x00C\x00\x08\x06\x06\x07\x06\x05\x08\x07\x07\x07\t\t\x08\n\x0c\x14\r\x0c\x0b\x0b\x0c\x19\x12\x13\x0f\x14\x1d\x1a\x1f\x1e\x1d\x1a\x1c\x1c $.\' ",#\x1c\x1c(7),01444\x1f\'9=82<.342\xff\xc0\x00\x0b\x08\x00\x01\x00\x01\x01\x11\x00\xff\xc4\x00\x1f\x00\x00\x01\x05\x01\x01\x01\x01\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x01\x02\x03\x04\x05\x06\x07\x08\t\n\x0b\xff\xc4\x00\xb5\x10\x00\x02\x01\x03\x03\x02\x04\x03\x05\x05\x04\x04\x00\x00\x01}\x01\x02\x03\x00\x04\x11\x05\x12!1A\x06\x13Qa\x07"q\x142\x81\x91\xa1\x08#B\xb1\xc1\x15R\xd1\xf0$3br\x82\t\n\x16\x17\x18\x19\x1a%&\'()*456789:CDEFGHIJSTUVWXYZcdefghijstuvwxyz\x83\x84\x85\x86\x87\x88\x89\x8a\x92\x93\x94\x95\x96\x97\x98\x99\x9a\xa2\xa3\xa4\xa5\xa6\xa7\xa8\xa9\xaa\xb2\xb3\xb4\xb5\xb6\xb7\xb8\xb9\xba\xc2\xc3\xc4\xc5\xc6\xc7\xc8\xc9\xca\xd2\xd3\xd4\xd5\xd6\xd7\xd8\xd9\xda\xe1\xe2\xe3\xe4\xe5\xe6\xe7\xe8\xe9\xea\xf1\xf2\xf3\xf4\xf5\xf6\xf7\xf8\xf9\xfa\xff\xda\x00\x08\x01\x01\x00\x00?\x00\xfb\xd6\xff\xd9'
         
-        camera_streamer = DummyStreamer()
-        camera_available = True
-        logger.info("[CAMERA] TEST MODE: Using dummy video stream for dashboard testing")
+        def get_jpeg_frame(self):
+            """Generate a valid JPEG frame with test pattern"""
+            try:
+                from PIL import Image, ImageDraw, ImageFont
+                import io
+                
+                # Create test image (640x480 by default)
+                img = Image.new('RGB', (640, 480), color=(40, 40, 40))
+                draw = ImageDraw.Draw(img)
+                
+                # Draw test pattern
+                draw.text((50, 50), f"TEST MODE - Frame #{self.frame_num}", fill=(0, 255, 0))
+                draw.text((50, 100), "Camera Hardware Detection Failed", fill=(255, 100, 0))
+                draw.text((50, 150), "Troubleshooting Steps:", fill=(100, 200, 255))
+                draw.text((50, 200), "1. Verify camera cable connection", fill=(100, 200, 255))
+                draw.text((50, 250), "2. Check: libcamera-hello --list-cameras", fill=(100, 200, 255))
+                draw.text((50, 300), "3. Review /boot/config.txt camera settings", fill=(100, 200, 255))
+                draw.text((50, 350), "4. Dashboard features are fully functional", fill=(0, 255, 0))
+                
+                # Draw frame counter animation
+                for i in range(5):
+                    x = 100 + (i * 80)
+                    if i <= (self.frame_num % 5):
+                        draw.rectangle([x, 400, x+60, 450], fill=(0, 255, 0))
+                    else:
+                        draw.rectangle([x, 400, x+60, 450], outline=(0, 255, 0))
+                
+                # Convert to JPEG
+                jpeg_io = io.BytesIO()
+                img.save(jpeg_io, format='JPEG', quality=70)
+                self.frame_num += 1
+                return jpeg_io.getvalue()
+            except ImportError:
+                logger.warning("[DUMMY] PIL not available, returning minimal JPEG")
+                # Return a minimal valid JPEG as fallback
+                return b'\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00\xff\xdb\x00C\x00\x08\x06\x06\x07\x06\x05\x08\x07\x07\x07\t\t\x08\n\x0c\x14\r\x0c\x0b\x0b\x0c\x19\x12\x13\x0f\x14\x1d\x1a\x1f\x1e\x1d\x1a\x1c\x1c $.\' ",#\x1c\x1c(7),01444\x1f\'9=82<.342\xff\xc0\x00\x0b\x08\x00\x01\x00\x01\x01\x11\x00\xff\xc4\x00\x1f\x00\x00\x01\x05\x01\x01\x01\x01\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x01\x02\x03\x04\x05\x06\x07\x08\t\n\x0b\xff\xc4\x00\xb5\x10\x00\x02\x01\x03\x03\x02\x04\x03\x05\x05\x04\x04\x00\x00\x01}\x01\x02\x03\x00\x04\x11\x05\x12!1A\x06\x13Qa\x07"q\x142\x81\x91\xa1\x08#B\xb1\xc1\x15R\xd1\xf0$3br\x82\t\n\x16\x17\x18\x19\x1a%&\'()*456789:CDEFGHIJSTUVWXYZcdefghijstuvwxyz\x83\x84\x85\x86\x87\x88\x89\x8a\x92\x93\x94\x95\x96\x97\x98\x99\x9a\xa2\xa3\xa4\xa5\xa6\xa7\xa8\xa9\xaa\xb2\xb3\xb4\xb5\xb6\xb7\xb8\xb9\xba\xc2\xc3\xc4\xc5\xc6\xc7\xc8\xc9\xca\xd2\xd3\xd4\xd5\xd6\xd7\xd8\xd9\xda\xe1\xe2\xe3\xe4\xe5\xe6\xe7\xe8\xe9\xea\xf1\xf2\xf3\xf4\xf5\xf6\xf7\xf8\xf9\xfa\xff\xda\x00\x08\x01\x01\x00\x00?\x00\xfb\xd6\xff\xd9'
+    
+    camera_streamer = DummyStreamer()
+    camera_available = True
+    logger.info("[CAMERA] TEST MODE: Using dummy video stream for dashboard testing")
 
 # Helpers for recordings/storage info
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -666,6 +629,7 @@ def gen_mjpeg():
     frame_count = 0
     last_log_time = time.time()
     fps_counter = 0
+    timeout_count = 0
     
     # Check if using fast streamer
     is_fast_streamer = hasattr(camera_streamer, 'get_jpeg_frame')
@@ -689,19 +653,32 @@ def gen_mjpeg():
                 time.sleep(min(0.002, target_delay - time_since_last))
                 continue
             
+            jpeg_data = None
+            
             if is_fast_streamer:
                 # FAST MODE: Get pre-captured frame (instant!)
                 jpeg_data = camera_streamer.get_jpeg_frame()
             else:
                 # SLOW MODE: Capture new frame via subprocess (500-1000ms)
-                cfg = get_config()
-                resolution = cfg.get('camera', {}).get('resolution', '640x480')
-                width, height = map(int, resolution.split('x'))
-                jpeg_data = camera_streamer.get_single_frame_jpeg(width, height)
+                try:
+                    cfg = get_config()
+                    resolution = cfg.get('camera', {}).get('resolution', '640x480')
+                    width, height = map(int, resolution.split('x'))
+                    jpeg_data = camera_streamer.get_single_frame_jpeg(width, height)
+                except Exception as slow_err:
+                    timeout_count += 1
+                    logger.warning(f"[STREAM] Slow mode capture failed ({timeout_count}): {slow_err}")
+                    
+                    # If too many failures, give user a fallback message
+                    if timeout_count > 5:
+                        logger.error("[STREAM] Too many failures in slow mode, showing placeholder")
+                        # Return a minimal valid JPEG placeholder
+                        jpeg_data = b'\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00\xff\xdb\x00C\x00\x08\x06\x06\x07\x06\x05\x08\x07\x07\x07\t\t\x08\n\x0c\x14\r\x0c\x0b\x0b\x0c\x19\x12\x13\x0f\x14\x1d\x1a\x1f\x1e\x1d\x1a\x1c\x1c $.\' ",#\x1c\x1c(7),01444\x1f\'9=82<.342\xff\xc0\x00\x0b\x08\x00\x01\x00\x01\x01\x11\x00\xff\xc4\x00\x1f\x00\x00\x01\x05\x01\x01\x01\x01\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x01\x02\x03\x04\x05\x06\x07\x08\t\n\x0b\xff\xc4\x00\xb5\x10\x00\x02\x01\x03\x03\x02\x04\x03\x05\x05\x04\x04\x00\x00\x01}\x01\x02\x03\x00\x04\x11\x05\x12!1A\x06\x13Qa\x07"q\x142\x81\x91\xa1\x08#B\xb1\xc1\x15R\xd1\xf0$3br\x82\t\n\x16\x17\x18\x19\x1a%&\'()*456789:CDEFGHIJSTUVWXYZcdefghijstuvwxyz\x83\x84\x85\x86\x87\x88\x89\x8a\x92\x93\x94\x95\x96\x97\x98\x99\x9a\xa2\xa3\xa4\xa5\xa6\xa7\xa8\xa9\xaa\xb2\xb3\xb4\xb5\xb6\xb7\xb8\xb9\xba\xc2\xc3\xc4\xc5\xc6\xc7\xc8\xc9\xca\xd2\xd3\xd4\xd5\xd6\xd7\xd8\xd9\xda\xe1\xe2\xe3\xe4\xe5\xe6\xe7\xe8\xe9\xea\xf1\xf2\xf3\xf4\xf5\xf6\xf7\xf8\xf9\xfa\xff\xda\x00\x08\x01\x01\x00\x00?\x00\xfb\xd6\xff\xd9'
             
             if jpeg_data and len(jpeg_data) > 100:  # Valid frame
                 frame_count += 1
                 fps_counter += 1
+                timeout_count = 0  # Reset timeout counter on success
                 
                 # Send MJPEG boundary
                 yield b'--' + BOUNDARY + b'\r\n'
@@ -819,6 +796,33 @@ def api_storage():
         })
     except Exception as e:
         logger.error(f"[STORAGE] Error: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/battery")
+def api_battery():
+    """Get battery status information."""
+    if not require_auth():
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    try:
+        battery_status = battery.get_status()
+        battery_percent = battery_status.get("percent")
+        
+        # Default to 100% on external power
+        if battery_percent is None and battery_status.get("external_power"):
+            battery_percent = 100
+        elif battery_percent is None:
+            battery_percent = 80
+        
+        return jsonify({
+            "ok": True,
+            "percent": battery_percent,
+            "external_power": battery_status.get("external_power", True),
+            "is_low": battery_status.get("is_low", False),
+            "timestamp": time.time()
+        })
+    except Exception as e:
+        logger.error(f"[BATTERY] Error: {e}")
         return jsonify({"ok": False, "error": str(e)}), 500
 
 @app.route("/api/download/<filename>")

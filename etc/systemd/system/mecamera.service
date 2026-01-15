@@ -6,7 +6,8 @@ After=network.target
 Type=simple
 User=pi
 WorkingDirectory=/home/pi/ME_CAM-DEV
-ExecStart=/home/pi/ME_CAM-DEV/venv/bin/python3 /home/pi/ME_CAM-DEV/main.py
+ExecStart=/usr/bin/python3 /home/pi/ME_CAM-DEV/main.py
+Environment="PYTHONPATH=/home/pi/.local/lib/python3.9/site-packages"
 Restart=always
 RestartSec=10
 

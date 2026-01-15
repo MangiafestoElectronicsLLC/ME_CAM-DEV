@@ -31,11 +31,18 @@ class BatteryMonitor:
         undervolt_now = bool(throttled & 0x1)
         undervolt_ever = bool(throttled & 0x10000)
 
-        # With generic USB power banks, exact % isn't available without a HAT/ADC.
-        # If user provides override in config, use it; otherwise None.
+        # Pi Zero 2W with USB power: no battery HAT available
+        # Show 100% if external power is good, 0% if undervolt detected
         percent = None
         if isinstance(percent_override, (int, float)):
             percent = int(percent_override)
+        else:
+            # Heuristic: If no undervolt, assume good USB power (100%)
+            # If undervolt, warn user (0%)
+            if undervolt_now:
+                percent = 0  # Undervolt = insufficient power
+            else:
+                percent = 100  # Good external power
 
         is_low = undervolt_now or (percent is not None and percent <= self.low_threshold_percent)
         external_power = not undervolt_now  # heuristic: if no undervolt, likely adequate external power
@@ -45,5 +52,6 @@ class BatteryMonitor:
             "percent": percent,
             "is_low": is_low,
             "external_power": external_power,
-            "undervolt_ever": undervolt_ever
+            "undervolt_ever": undervolt_ever,
+            "note": "USB power detection - 100% if healthy, 0% if undervolt"
         }
