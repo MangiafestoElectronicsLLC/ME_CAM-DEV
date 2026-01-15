@@ -7,6 +7,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 from web.app import app, fast_motion_detector
 from src.detection import motion_service
+from src.core import get_sms_notifier
 
 os.makedirs("logs", exist_ok=True)
 
@@ -14,6 +15,16 @@ if __name__ == "__main__":
     logger.add("logs/mecam.log", rotation="10 MB", retention="14 days", backtrace=True, diagnose=True)
     
     logger.info("=== ME_CAM v2.0 - Organized Structure ===")
+    
+    # Initialize SMS notifier
+    try:
+        sms_notifier = get_sms_notifier()
+        if sms_notifier.enabled:
+            logger.success("[SMS] Notifier initialized - SMS alerts ENABLED")
+        else:
+            logger.info("[SMS] Notifier ready - SMS alerts DISABLED")
+    except Exception as e:
+        logger.error(f"[SMS] Failed to initialize notifier: {e}")
     
     # Only start libcamera-still motion service if fast motion detector is NOT available
     # DISABLED: libcamera-still hangs on Pi Zero 2W - use TEST MODE instead

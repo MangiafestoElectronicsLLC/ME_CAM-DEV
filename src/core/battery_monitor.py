@@ -46,6 +46,20 @@ class BatteryMonitor:
 
         is_low = undervolt_now or (percent is not None and percent <= self.low_threshold_percent)
         external_power = not undervolt_now  # heuristic: if no undervolt, likely adequate external power
+        
+        # Calculate estimated runtime with 10,000mAh power bank
+        # Pi Zero 2W draws approximately 350-400mA under load
+        powerbank_mah = 10000
+        avg_current_draw_ma = 380  # Average for Pi Zero 2W with camera
+        
+        if percent and percent > 0:
+            remaining_mah = (percent / 100.0) * powerbank_mah
+            runtime_hours = remaining_mah / avg_current_draw_ma
+            runtime_hours_int = int(runtime_hours)
+            runtime_minutes = int((runtime_hours - runtime_hours_int) * 60)
+        else:
+            runtime_hours_int = 0
+            runtime_minutes = 0
 
         return {
             "enabled": True,
@@ -53,5 +67,7 @@ class BatteryMonitor:
             "is_low": is_low,
             "external_power": external_power,
             "undervolt_ever": undervolt_ever,
+                        "runtime_hours": runtime_hours_int,
+                        "runtime_minutes": runtime_minutes,
             "note": "USB power detection - 100% if healthy, 0% if undervolt"
         }

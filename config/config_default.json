@@ -5,6 +5,17 @@
   "pin_code": "1234",
   "emergency_phone": "+1-800-555-0123",
   "emergency_primary_contact": "",
+  "send_motion_to_emergency": false,
+  "alert_cooldown": 5,
+  "motion_threshold": 0.5,
+  "motion_record_enabled": true,
+  "motion_record_duration": 10,
+  "nanny_cam_enabled": false,
+  "sms_enabled": false,
+  "sms_phone_to": "",
+  "sms_api_url": "",
+  "sms_api_key": "",
+  "sms_rate_limit": 5,
   "owner_email": "",
   "security_contacts": [],
   "emergency_mode": "manual",
@@ -80,7 +91,31 @@
     "email_on_motion": false,
     "gdrive_on_motion": false,
     "webhook_on_motion": false,
-    "webhook_url": ""
+    "webhook_url": "",
+    "sms": {
+      "enabled": false,
+      "provider": "twilio",
+      "rate_limit_minutes": 5,
+      "motion_threshold": 0.5,
+      "phone_to": "",
+      "twilio": {
+        "account_sid": "",
+        "auth_token": "",
+        "phone_from": ""
+      },
+      "sns": {
+        "region": "us-east-1"
+      },
+      "plivo": {
+        "auth_id": "",
+        "auth_token": "",
+        "phone_from": ""
+      },
+      "generic_http": {
+        "url": "",
+        "auth_token": ""
+      }
+    }
   },
   "first_run_completed": false
 }

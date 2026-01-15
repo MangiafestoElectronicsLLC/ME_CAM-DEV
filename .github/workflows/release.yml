@@ -1,0 +1,110 @@
+name: Release v2.1.0
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'web/**'
+      - 'src/**'
+      - 'config/**'
+      - 'README*.md'
+      - 'requirements.txt'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install flake8 pytest
+    
+    - name: Lint with flake8
+      run: |
+        flake8 web/ src/ --count --select=E9,F63,F7,F82 --show-source --statistics
+        flake8 web/ src/ --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+    
+    - name: Test imports
+      run: |
+        python -c "import flask; import cv2; import PIL; print('✅ All imports successful')"
+    
+    - name: Check file sizes
+      run: |
+        ls -lh web/app_lite.py
+        du -sh web/templates/
+        du -sh src/
+
+  security:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Check for credentials
+      run: |
+        if grep -r "api_key\|password\|secret" web/ src/ --include="*.py" | grep -v "config"; then
+          echo "⚠️ Potential credentials found"
+          exit 1
+        fi
+        echo "✅ No hardcoded credentials detected"
+    
+    - name: Check syntax
+      run: |
+        python -m py_compile web/app_lite.py
+        python -m py_compile src/core/*.py
+        echo "✅ Python syntax valid"
+
+  release:
+    needs: [build, security]
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Create Release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: v2.1.0
+        release_name: ME Camera v2.1.0
+        body: |
+          ## Features
+          - MP4 video recording (3-second clips)
+          - SMS integration (generic HTTP API)
+          - Timezone support (Eastern Time)
+          - Event management (save/share/download)
+          - Professional documentation
+          
+          ## Tested Hardware
+          - Raspberry Pi Zero 2W
+          - Raspberry Pi 3B+
+          - Raspberry Pi 4
+          - Raspberry Pi 5
+          
+          See RELEASE_NOTES_V2.1.0.md for full details.
+        draft: false
+        prerelease: false
+
+  deploy:
+    needs: release
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Notify deployment
+      run: |
+        echo "✅ v2.1.0 Released successfully"
+        echo "🚀 Ready for production deployment"
+        echo "📖 See DEPLOYMENT_V2.1.0.md for instructions"

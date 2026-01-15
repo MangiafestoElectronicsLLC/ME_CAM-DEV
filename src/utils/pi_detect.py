@@ -26,9 +26,9 @@ def get_pi_model():
                 return {
                     'name': 'Raspberry Pi Zero 2W',
                     'ram_mb': 512,
-                    'can_stream': False,
+                    'can_stream': True,  # LITE MODE supports camera streaming
                     'max_cameras': 1,
-                    'recommended_mode': 'test'
+                    'recommended_mode': 'lite'  # Use LITE mode for Pi Zero 2W
                 }
             elif 'Pi 3 Model B Plus' in model_str or 'Pi 3B+' in model_str:
                 return {
@@ -120,6 +120,16 @@ def get_camera_config(pi_model):
             'fps': 1,
             'enable_motion': False,
             'reason': 'Insufficient RAM for camera streaming'
+        }
+    # Pi Zero 2W and other 512MB devices → LITE mode
+    elif pi_model['ram_mb'] < 1024:
+        return {
+            'mode': 'lite',
+            'use_fast_streamer': False,
+            'resolution': '640x480',
+            'fps': 20,
+            'enable_motion': False,
+            'reason': 'LITE MODE for 512MB RAM'
         }
     elif pi_model['ram_mb'] >= 4096:
         # Pi 4/5 with 4GB+ RAM

@@ -1,0 +1,23 @@
+[Unit]
+Description=ME Camera Lite Mode (Pi Zero 2W Optimized)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/ME_CAM-DEV
+Environment="PYTHONPATH=/home/pi/ME_CAM-DEV"
+ExecStart=/usr/bin/python3 /home/pi/ME_CAM-DEV/main_lite.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# Memory optimization for Pi Zero 2W
+# Limit memory usage to prevent OOM killer
+MemoryMax=400M
+MemoryHigh=350M
+
+[Install]
+WantedBy=multi-user.target

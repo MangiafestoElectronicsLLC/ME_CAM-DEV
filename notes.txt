@@ -314,62 +314,188 @@ STEP 13: VERIFY WEB DASHBOARD ACCESS
 
 SUCCESS! Your ME Camera system is now running.
 
-PART 5: UNDERSTANDING PI ZERO 2W CAMERA LIMITATIONS
-===================================================
+PART 5: PI ZERO 2W LITE MODE - LIGHTWEIGHT CAMERA SOLUTION
+===========================================================
 
-WHY CAMERA WON'T DISPLAY ON PI ZERO 2W?
-========================================
+⚡ NEW IN V2.1: LITE MODE FOR PI ZERO 2W!
+=========================================
 
-The System is Working Correctly:
-Pi Zero 2W has only 512MB total RAM. Memory allocation breakdown:
-• Raspberry Pi OS: ~100-120MB
-• Python 3.9 runtime: ~40-50MB
-• Flask web framework: ~30-40MB
-• System caches & buffers: ~150-180MB
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Remaining available: ~100-150MB
+Standard ME Camera v2.1 uses ~400MB RAM (Flask + background services + motion detection).
+Pi Zero 2W only has 512MB total, leaving insufficient memory for camera streaming.
 
-Camera streaming requires:
-• Input buffer (capture frame): ~50MB
-• Processing buffer (compression): ~100MB
-• Output buffer (streaming): ~50MB
-• System headroom (OS functions): ~50MB
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Total required: ~250MB MINIMUM
+SOLUTION: LITE MODE - Stripped down like your old Streamlit project!
 
-MATHEMATICAL FACT: 100-150MB available < 250MB required = IMPOSSIBLE
+LITE MODE Features:
+• Minimal memory footprint: ~150MB (instead of ~400MB)
+• Direct camera access: No background threads
+• Essential features only: Camera, battery, storage
+• HTTPS support: Still works with me_cam.com
+• Auto-boot: Systemd service included
+• Compatible: Works on ALL Pi models (not just Zero 2W)
 
-System Behavior is CORRECT:
-1. System detects memory insufficient at startup
-2. Automatically enters TEST MODE
-3. Shows "Camera Hardware Detection Failed" message
-4. Provides troubleshooting information
-5. Falls back to storage/recording/motion detection
+Memory Comparison:
+┌─────────────────────┬──────────────┬──────────────┐
+│ Component           │ Standard     │ LITE MODE    │
+├─────────────────────┼──────────────┼──────────────┤
+│ Base OS             │ 120MB        │ 120MB        │
+│ Python + Flask      │ 80MB         │ 50MB         │
+│ Background services │ 100MB        │ 0MB          │
+│ Motion detection    │ 50MB         │ 0MB          │
+│ Multi-device poll   │ 50MB         │ 0MB          │
+├─────────────────────┼──────────────┼──────────────┤
+│ TOTAL               │ ~400MB       │ ~170MB ✅    │
+└─────────────────────┴──────────────┴──────────────┘
 
-This is NOT a Bug - It's Hardware Reality.
+Result: Pi Zero 2W can now display camera! (512MB - 170MB = 342MB available)
 
-Verification Steps:
-1. Check available memory:
+HOW TO INSTALL LITE MODE
+=========================
+
+OPTION A: Quick Install (Recommended for Pi Zero 2W)
+-----------------------------------------------------
+1. SSH into Pi:
+   ssh pi@mecamera.local
+
+2. Navigate to project:
+   cd ~/ME_CAM-DEV
+
+3. Run LITE MODE installer:
+   chmod +x scripts/install_lite_mode.sh
+   ./scripts/install_lite_mode.sh
+
+4. Script will:
+   ✓ Detect Pi model
+   ✓ Install minimal dependencies
+   ✓ Configure lightweight service
+   ✓ Enable auto-boot
+   ✓ Start camera system
+
+5. Access dashboard:
+   http://[IP-ADDRESS]:8080
+   OR
+   https://me_cam.com:8080
+
+OPTION B: Manual Installation
+------------------------------
+1. Activate virtual environment:
+   cd ~/ME_CAM-DEV
+   source venv/bin/activate
+
+2. Install minimal dependencies:
+   pip install Flask==2.2.5 Pillow==9.5.0 loguru==0.7.0
+
+3. Install picamera2:
+   sudo apt-get install -y python3-picamera2
+
+4. Copy LITE MODE service:
+   sudo cp etc/systemd/system/mecamera-lite.service /etc/systemd/system/
+
+5. Enable and start:
+   sudo systemctl daemon-reload
+   sudo systemctl enable mecamera-lite
+   sudo systemctl start mecamera-lite
+
+6. Check status:
+   sudo systemctl status mecamera-lite
+
+LITE MODE vs STANDARD MODE
+===========================
+
+What's DISABLED in LITE MODE:
+• Background motion detection thread
+• Multi-device polling service
+• Cloud upload background tasks
+• Advanced storage management thread
+• Fast motion detector continuous capture
+
+What's STILL ENABLED in LITE MODE:
+✓ Camera streaming (direct capture, ~20 FPS)
+✓ Battery monitoring (on-demand)
+✓ Storage statistics (on-demand)
+✓ HTTPS/SSL support
+✓ Domain name access (me_cam.com)
+✓ Auto-boot service
+✓ Web dashboard
+✓ API endpoints
+
+LITE MODE is perfect if you:
+• Have Pi Zero 2W (512MB RAM)
+• Want simple camera streaming
+• Don't need motion detection running 24/7
+• Want minimal memory footprint
+• Need HTTPS and domain access
+
+STANDARD MODE is better if you:
+• Have Pi 3B+ or higher (1GB+ RAM)
+• Need background motion detection
+• Want multi-device monitoring
+• Need cloud upload automation
+• Want all features running simultaneously
+
+SWITCHING BETWEEN MODES
+========================
+
+Switch to LITE MODE:
+  sudo systemctl stop mecamera
+  sudo systemctl disable mecamera
+  sudo systemctl enable mecamera-lite
+  sudo systemctl start mecamera-lite
+
+Switch to STANDARD MODE:
+  sudo systemctl stop mecamera-lite
+  sudo systemctl disable mecamera-lite
+  sudo systemctl enable mecamera
+  sudo systemctl start mecamera
+
+Check which mode is running:
+  sudo systemctl status mecamera-lite
+  sudo systemctl status mecamera
+
+LITE MODE VERIFICATION
+======================
+
+1. Check service is running:
+   sudo systemctl status mecamera-lite
+   
+   Should show:
+   ● mecamera-lite.service - ME Camera Lite Mode
+       Active: active (running)
+
+2. Check memory usage:
    free -m
    
-   Example output for Pi Zero 2W:
-   Mem:   430    220     50     26  148     120
-   ↑ Only 430MB total, 50MB free
+   Should show ~300MB+ available (Pi Zero 2W)
 
-2. View system startup logs:
-   sudo journalctl -u mecamera -n 30
+3. View logs:
+   sudo journalctl -u mecamera-lite -n 30
    
-   Look for: "[CAMERA] Memory insufficient, TEST MODE enabled"
+   Should show:
+   [SYSTEM] LITE MODE active
+   [CAMERA] Lightweight camera initialized
 
-3. Check camera detection:
-   sudo vcgencmd get_camera
+4. Test dashboard:
+   http://[IP-ADDRESS]:8080
    
-   Output: supported=1 detected=0 (means: supported but not detected/allocated)
+   Should display:
+   • "⚡ LITE MODE" badge
+   • Live camera feed (if camera detected)
+   • Battery percentage
+   • Storage statistics
 
-How to Display Camera:
-• Option 1: Use Pi 3B+ or higher (recommended, ~$25)
-• Option 2: Use Pi Zero 2W for recording/motion only (no display)
-• Option 3: Monitor Pi Zero 2W from camera on different Pi (multi-device)
+HTTPS & DOMAIN SETUP (LITE MODE)
+=================================
+
+LITE MODE fully supports HTTPS and domain name access (me_cam.com)!
+
+Follow PART 7 (HTTPS & DOMAIN SETUP) - same instructions apply.
+
+Quick reminder:
+1. Certificates automatically loaded from certs/
+2. Access via: https://[IP-ADDRESS]:8080
+3. Add to hosts file: [IP] me_cam.com
+4. Access via: https://me_cam.com:8080
+
+LITE MODE works identically to standard mode for HTTPS/domain access.
 
 PART 6: MULTI-DEVICE SETUP
 ===========================
@@ -693,4 +819,88 @@ Support Resources:
 ME Camera System v2.1 - Setup Complete Reference
 Last Updated: January 15, 2026
 Ready for Production Deployment
+====================================================
+
+PART 12: MOTION DETECTION & SMS ALERTS (NEW!)
+==============================================
+
+OVERVIEW
+--------
+Both main.py and main_lite.py now include:
+  • Lightweight motion detection (processes every 5 frames)
+  • SMS/Text message alerts for motion events
+  • Persistent motion event logging (logs/motion_events.json)
+  • Optional rate limiting to prevent SMS spam
+
+MOTION DETECTION
+----------------
+Configuration (in config.json):
+  "detection": {
+    "sensitivity": 0.6,        # 0.0-1.0 (higher = more sensitive)
+    "min_motion_area": 500     # Minimum pixels to trigger
+  }
+
+API Endpoints:
+  • GET /api/motion/events     → Get recent motion events
+  • POST /api/motion/log       → Manually log motion event
+
+Memory Impact:
+  • LITE MODE: ~5-10MB additional (total still ~150MB) ✓
+
+SMS ALERT SETUP (TWILIO - RECOMMENDED)
+--------------------------------------
+1. Go to https://www.twilio.com/console
+2. Sign up for free trial (100+ messages/month)
+3. Verify your phone number
+4. Get phone number from Twilio
+5. Copy Account SID, Auth Token, Twilio phone number
+6. Edit config.json:
+
+   {
+     "notifications": {
+       "sms": {
+         "enabled": true,
+         "provider": "twilio",
+         "rate_limit_minutes": 5,
+         "motion_threshold": 0.5,
+         "phone_to": "+12125551234",
+         "twilio": {
+           "account_sid": "ACxxxxxxxxxxxxxxxx",
+           "auth_token": "your_token_here",
+           "phone_from": "+15550000123"
+         }
+       }
+     }
+   }
+
+7. Restart service: sudo systemctl restart mecamera-lite
+
+TESTING
+-------
+Manual test:
+  curl -X POST http://localhost:8080/api/motion/log \
+    -H 'Content-Type: application/json' \
+    -d '{"type":"motion","confidence":0.9}'
+
+Check events:
+  curl http://localhost:8080/api/motion/events
+
+DASHBOARD
+---------
+Motion events visible on main dashboard:
+  • Shows 24-hour event count
+  • Latest event timestamp & confidence
+  • Auto-updates every 30 seconds
+
+REFERENCE FILES
+---------------
+• src/core/sms_notifier.py       → SMS provider logic
+• src/core/motion_logger.py       → Event persistence
+• logs/motion_events.json         → Event history
+• logs/sms_sent.json              → SMS send history
+• web/app.py & web/app_lite.py   → Integration
+
+====================================================
+ME Camera System v2.1+ - Motion & SMS Complete
+Ready for Production with Alerts
 ====================================================

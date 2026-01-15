@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Motion Events - ME Camera</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: white;
+            border-radius: 15px;
+            padding: 20px 30px;
+            margin-bottom: 20px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h1 {
+            color: #667eea;
+            font-size: 24px;
+        }
+
+        .header-buttons {
+            display: flex;
+            gap: 10px;
+        }
+
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+
+        .btn-back {
+            background: #f0f0f0;
+            color: #333;
+        }
+
+        .btn-back:hover {
+            background: #e0e0e0;
+        }
+
+        .btn-clear {
+            background: #ff6b6b;
+            color: white;
+        }
+
+        .btn-clear:hover {
+            background: #ff5252;
+        }
+
+        .events-list {
+            background: white;
+            border-radius: 15px;
+            overflow: hidden;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        }
+
+        .event-item {
+            padding: 20px;
+            border-bottom: 1px solid #f0f0f0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            transition: background 0.2s;
+        }
+
+        .event-item:hover {
+            background: #f9f9f9;
+        }
+
+        .event-item:last-child {
+            border-bottom: none;
+        }
+
+        .event-info {
+            flex: 1;
+        }
+
+        .event-time {
+            font-size: 16px;
+            font-weight: 600;
+            color: #667eea;
+        }
+
+        .event-details {
+            font-size: 13px;
+            color: #666;
+            margin-top: 5px;
+        }
+
+        .event-confidence {
+            display: inline-block;
+            background: #e3f2fd;
+            color: #1976d2;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            margin-top: 5px;
+        }
+
+        .event-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .btn-delete {
+            background: #ff6b6b;
+            color: white;
+            padding: 8px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: background 0.2s;
+        }
+
+        .btn-delete:hover {
+            background: #ff5252;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: #999;
+        }
+
+        .empty-state-icon {
+            font-size: 48px;
+            margin-bottom: 10px;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .stat-card {
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            text-align: center;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        }
+
+        .stat-number {
+            font-size: 32px;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: #999;
+            margin-top: 5px;
+            text-transform: uppercase;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #667eea;
+        }
+
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        .notification {
+            padding: 15px 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        .notification.success {
+            background: #c8e6c9;
+            color: #2e7d32;
+            display: block;
+        }
+
+        .notification.error {
+            background: #ffcdd2;
+            color: #c62828;
+            display: block;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 9999;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.9);
+        }
+
+        .modal.active {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-content {
+            max-width: 90%;
+            max-height: 90%;
+            position: relative;
+        }
+
+        .modal-close {
+            position: absolute;
+            top: -40px;
+            right: 0;
+            color: white;
+            font-size: 40px;
+            cursor: pointer;
+            background: none;
+            border: none;
+        }
+
+        .modal-content img,
+        .modal-content video {
+            max-width: 100%;
+            max-height: 90vh;
+            border-radius: 8px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎯 Motion Events</h1>
+            <div class="header-buttons">
+                <button class="btn-back" onclick="window.location.href='/'">← Back to Dashboard</button>
+                <button class="btn-clear" onclick="clearAllEvents()">Clear All Events</button>
+            </div>
+        </div>
+
+        <div id="notification" class="notification"></div>
+
+        <div class="stats">
+            <div class="stat-card">
+                <div class="stat-number" id="total-count">{{ events|length }}</div>
+                <div class="stat-label">Total Events</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="today-count">0</div>
+                <div class="stat-label">Today</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="latest-time">-</div>
+                <div class="stat-label">Latest Event</div>
+            </div>
+        </div>
+
+        <div class="events-list" id="events-container">
+            {% if events %}
+            {% for event in events|reverse %}
+            <div class="event-item">
+                <div class="event-info">
+                    <div class="event-time">{{ event.get('timestamp', 'N/A') }}</div>
+                    <div class="event-details">
+                        Type: <strong>{{ event.get('type', 'unknown')|upper }}</strong> |
+                        Mode: <strong>{{ event.get('details', {}).get('mode', 'N/A') }}</strong>
+                    </div>
+                    <div class="event-confidence">
+                        Confidence: {{ (event.get('confidence', 0) * 100)|int }}%
+                    </div>
+                </div>
+                <div class="event-actions">
+                    <button class="btn-delete" onclick="deleteEvent('{{ event.get('id', '') }}')">Delete</button>
+                </div>
+            </div>
+            {% endfor %}
+            {% else %}
+            <div class="empty-state">
+                <div class="empty-state-icon">📭</div>
+                <p>No motion events recorded yet</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <script>
+        function loadEvents() {
+            fetch('/api/motion/events')
+                .then(r => r.json())
+                .then(data => {
+                    const events = data.events || [];
+                    document.getElementById('total-count').textContent = events.length;
+
+                    // Count today
+                    const today = new Date().toISOString().split('T')[0];
+                    const todayCount = events.filter(e => e.timestamp.startsWith(today)).length;
+                    document.getElementById('today-count').textContent = todayCount;
+
+                    // Latest event
+                    if (events.length > 0) {
+                        const latest = events[events.length - 1];
+                        const time = new Date(latest.timestamp).toLocaleTimeString('en-US', { hour12: true });
+                        document.getElementById('latest-time').textContent = time;
+                    }
+
+                    renderEvents(events);
+                });
+        }
+
+        function formatTimestamp(timestamp) {
+            // Parse the timestamp and convert to local timezone
+            // Brockport, NY is Eastern Time (UTC-5 EST or UTC-4 EDT)
+            const date = new Date(timestamp + 'Z'); // Add Z to force UTC parsing
+            return date.toLocaleString('en-US', {
+                timeZone: 'America/New_York',
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+                hour12: true
+            });
+        }
+
+        function renderEvents(events) {
+            const container = document.getElementById('events-container');
+
+            if (events.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">📭</div>
+                        <p>No motion events recorded yet</p>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = events.reverse().map(event => {
+                const formattedTime = formatTimestamp(event.timestamp);
+                const videoPath = event.details?.video_path || null;
+                const isVideo = videoPath && (videoPath.endsWith('.mp4') || videoPath.endsWith('.h264'));
+                const videoButton = videoPath ?
+                    `<button class="btn-delete" style="background: #2196F3;" onclick="viewMedia('/recordings/${videoPath}', ${isVideo})">📹 ${isVideo ? 'Video' : 'Image'}</button>` :
+                    '';
+
+                return `
+                    <div class="event-item">
+                        <div class="event-info">
+                            <div class="event-time">${formattedTime}</div>
+                            <div class="event-details">
+                                Type: <strong>${event.type.toUpperCase()}</strong> | 
+                                Mode: <strong>${event.details?.mode || 'N/A'}</strong>
+                                ${event.has_video ? ' | 📹 <strong>' + (isVideo ? 'Video' : 'Image') + ' Available</strong>' : ''}
+                            </div>
+                            <div class="event-confidence">
+                                Confidence: ${Math.round((event.confidence || 0) * 100)}%
+                            </div>
+                        </div>
+                        <div class="event-actions">
+                            ${videoButton}
+                            <button class="btn-delete" style="background: #FF9800;" onclick="saveEventToFile('${event.id}', '${formattedTime}')">💾 Save</button>
+                            <button class="btn-delete" onclick="deleteEvent('${event.id}')">Delete</button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function deleteEvent(eventId) {
+            if (!confirm('Delete this event?')) return;
+
+            fetch(`/api/motion/delete/${eventId}`, { method: 'POST' })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.ok) {
+                        showNotification('Event deleted', 'success');
+                        loadEvents();
+                    }
+                });
+        }
+
+        function viewMedia(path, isVideo) {
+            const modal = document.getElementById('mediaModal');
+            const content = document.getElementById('mediaContent');
+
+            if (isVideo) {
+                content.innerHTML = `
+                    <div style="position: relative; width: 100%; text-align: center;">
+                        <video controls autoplay muted style="max-width: 100%; max-height: 80vh; border-radius: 8px; background: #000;">
+                            <source src="${path}" type="video/mp4">
+                            Your browser does not support the video tag.
+                        </video>
+                        <div style="margin-top: 15px; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
+                            <button onclick="downloadMedia('${path}', 'video')" style="padding: 10px 20px; background: #4CAF50; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 14px;">⬇️ Download</button>
+                            <button onclick="shareMedia('${path}');" style="padding: 10px 20px; background: #2196F3; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 14px;">📤 Share</button>
+                        </div>
+                    </div>
+                `;
+            } else {
+                content.innerHTML = `
+                    <div style="position: relative; text-align: center;">
+                        <img src="${path}" alt="Motion capture" style="max-width: 100%; max-height: 80vh; border-radius: 8px;">
+                        <div style="margin-top: 15px; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
+                            <button onclick="downloadMedia('${path}', 'image')" style="padding: 10px 20px; background: #4CAF50; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 14px;">⬇️ Download</button>
+                            <button onclick="shareMedia('${path}');" style="padding: 10px 20px; background: #2196F3; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 14px;">📤 Share</button>
+                        </div>
+                    </div>
+                `;
+            }
+
+            modal.classList.add('active');
+        }
+
+        function downloadMedia(path, type) {
+            const filename = path.split('/').pop();
+            const xhr = new XMLHttpRequest();
+            xhr.open('GET', path, true);
+            xhr.responseType = 'blob';
+            xhr.onload = function () {
+                const blob = xhr.response;
+                const url = window.URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = filename;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                window.URL.revokeObjectURL(url);
+            };
+            xhr.send();
+        }
+
+        function shareMedia(path) {
+            const filename = path.split('/').pop();
+            const timestamp = new Date().toLocaleString('en-US', { timeZone: 'America/New_York' });
+            const message = `Motion event recorded at ${timestamp}. File: ${filename}`;
+
+            if (navigator.share) {
+                navigator.share({
+                    title: 'Motion Event',
+                    text: message,
+                    url: path
+                });
+            } else {
+                prompt('Share this link:', window.location.origin + path);
+            }
+        }
+
+        function closeModal() {
+            const modal = document.getElementById('mediaModal');
+            modal.classList.remove('active');
+            document.getElementById('mediaContent').innerHTML = '';
+        }
+
+        function clearAllEvents() {
+            if (!confirm('Clear ALL motion events? This cannot be undone.')) return;
+
+            fetch('/api/motion/clear', { method: 'POST' })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.ok) {
+                        showNotification('All events cleared', 'success');
+                        loadEvents();
+                    }
+                });
+        }
+
+        function showNotification(message, type) {
+            const notif = document.getElementById('notification');
+            notif.textContent = message;
+            notif.className = `notification ${type}`;
+            setTimeout(() => notif.className = 'notification', 3000);
+        }
+
+        function saveEventToFile(eventId, timestamp) {
+            fetch('/api/motion/events')
+                .then(r => r.json())
+                .then(data => {
+                    const events = data.events || [];
+                    const event = events.find(e => e.id === eventId);
+                    if (!event) {
+                        showNotification('Event not found', 'error');
+                        return;
+                    }
+
+                    const eventData = JSON.stringify(event, null, 2);
+                    const blob = new Blob([eventData], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = `motion_event_${eventId}_${timestamp.replace(/[^0-9]/g, '')}.json`;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    URL.revokeObjectURL(url);
+                    showNotification('Event saved as JSON', 'success');
+                });
+        }
+
+        // Load events on page load and refresh every 5 seconds
+        loadEvents();
+        setInterval(loadEvents, 5000);
+    </script>
+
+    <!-- Media Viewer Modal -->
+    <div id="mediaModal" class="modal" onclick="closeModal()">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <button class="modal-close" onclick="closeModal()">&times;</button>
+            <div id="mediaContent"></div>
+        </div>
+    </div>
+</body>
+
+</html>

@@ -14,7 +14,8 @@ from src.core import (
     get_config, save_config, is_first_run, mark_first_run_complete,
     authenticate, create_user, user_exists, get_user,
     BatteryMonitor, extract_thumbnail, generate_setup_qr,
-    log_motion_event, get_recent_events, get_event_statistics, export_events_csv
+    log_motion_event, get_recent_events, get_event_statistics, export_events_csv,
+    get_sms_notifier
 )
 from src.camera import (
     camera_coordinator, LibcameraStreamer, is_libcamera_available,
@@ -1130,6 +1131,26 @@ def api_log_motion():
         details = data.get("details", {})
         
         event = log_motion_event(event_type=event_type, confidence=confidence, details=details)
+        
+        # Send SMS alert if enabled and confidence threshold met
+        try:
+            sms_notifier = get_sms_notifier()
+            config = get_config()
+            sms_config = config.get("notifications", {}).get("sms", {})
+            
+            if sms_config.get("enabled") and event_type in ["motion", "person", "intrusion", "security_alert"]:
+                phone_to = sms_config.get("phone_to")
+                if phone_to:
+                    device_location = config.get("device_location", "Unknown")
+                    sms_notifier.notify_motion(
+                        phone_to,
+                        event_type=event_type,
+                        confidence=confidence,
+                        location=device_location
+                    )
+                    logger.info(f"[SMS] Motion alert queued for {event_type} at {confidence:.0%}")
+        except Exception as sms_error:
+            logger.error(f"[SMS] Failed to send alert: {sms_error}")
         
         return jsonify({
             "ok": True,

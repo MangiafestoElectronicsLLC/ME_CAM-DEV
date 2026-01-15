@@ -4,1056 +4,444 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ME Camera Settings</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <title>Configuration - ME Camera</title>
     <style>
-        .navbar {
-            background: linear-gradient(90deg, #1f1f1f 0%, #2a2a2a 100%);
-            padding: 15px 20px;
-            display: flex;
-            gap: 20px;
-            align-items: center;
-            border-bottom: 1px solid #333;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-            position: sticky;
-            top: 0;
-            z-index: 1000;
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
         }
 
-        .navbar .brand {
-            font-weight: bold;
-            font-size: 18px;
-            color: #2979ff;
-            margin-right: auto;
-        }
-
-        .navbar a {
-            color: #aaa;
-            text-decoration: none;
-            padding: 8px 15px;
-            border-radius: 4px;
-            transition: all 0.3s;
-        }
-
-        .navbar a:hover {
-            background: #333;
-            color: #fff;
-        }
-
-        .settings-container {
-            max-width: 1000px;
-            margin: 0 auto;
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
             padding: 20px;
         }
 
-        .settings-header {
-            margin-bottom: 30px;
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
         }
 
-        .settings-header h1 {
-            font-size: 32px;
-            margin-bottom: 5px;
-            background: linear-gradient(135deg, #2979ff, #64b5f6);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
-
-        .settings-header p {
-            color: #999;
-            margin: 0;
-        }
-
-        /* Tab Navigation */
-        .settings-tabs {
+        .header {
+            background: white;
+            border-radius: 15px;
+            padding: 20px 30px;
+            margin-bottom: 20px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
             display: flex;
-            gap: 10px;
-            margin-bottom: 30px;
-            border-bottom: 2px solid #333;
-            overflow-x: auto;
-            flex-wrap: wrap;
+            justify-content: space-between;
+            align-items: center;
         }
 
-        .settings-tab-btn {
-            background: none;
+        .header h1 {
+            color: #667eea;
+            font-size: 24px;
+        }
+
+        .btn-back {
+            background: #f0f0f0;
+            color: #333;
+            padding: 10px 20px;
             border: none;
-            color: #999;
-            padding: 12px 20px;
+            border-radius: 8px;
             cursor: pointer;
-            border-bottom: 3px solid transparent;
-            transition: all 0.3s;
-            font-size: 14px;
-            font-weight: 500;
-            white-space: nowrap;
+            font-weight: 600;
+            transition: background 0.3s;
         }
 
-        .settings-tab-btn:hover {
-            color: #ccc;
+        .btn-back:hover {
+            background: #e0e0e0;
         }
 
-        .settings-tab-btn.active {
-            color: #2979ff;
-            border-bottom-color: #2979ff;
+        .config-form {
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
         }
 
-        /* Tab Content */
-        .settings-tabs-content {
-            display: none;
+        .form-section {
+            margin-bottom: 30px;
         }
 
-        .settings-tabs-content.active {
+        .form-section:last-child {
+            margin-bottom: 0;
+        }
+
+        .section-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: #667eea;
+            text-transform: uppercase;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #667eea;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group:last-child {
+            margin-bottom: 0;
+        }
+
+        label {
             display: block;
+            font-size: 14px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 5px;
         }
 
-        .settings-section {
-            background: linear-gradient(135deg, #1f1f1f 0%, #262626 100%);
-            border-radius: 12px;
-            padding: 25px;
-            margin-bottom: 20px;
-            border: 1px solid #333;
+        input[type="text"],
+        input[type="tel"],
+        input[type="number"],
+        select {
+            width: 100%;
+            padding: 10px 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.3s;
         }
 
-        .settings-section h3 {
-            color: #2979ff;
-            margin-top: 0;
-            margin-bottom: 20px;
-            padding-bottom: 12px;
-            border-bottom: 1px solid #444;
-            font-size: 18px;
+        input[type="text"]:focus,
+        input[type="tel"]:focus,
+        input[type="number"]:focus,
+        select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+            accent-color: #667eea;
+        }
+
+        .help-text {
+            font-size: 12px;
+            color: #999;
+            margin-top: 3px;
         }
 
         .form-row {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 20px;
-            margin-bottom: 20px;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
         }
 
         .form-row.full {
             grid-template-columns: 1fr;
         }
 
-        .form-group {
-            margin-bottom: 0;
-        }
-
-        .form-group label {
-            display: block;
-            color: #e0e0e0;
-            margin-bottom: 8px;
-            font-size: 13px;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-
-        .form-group input[type="text"],
-        .form-group input[type="email"],
-        .form-group input[type="password"],
-        .form-group input[type="number"],
-        .form-group select,
-        .form-group textarea {
-            width: 100%;
-            padding: 10px 12px;
-            background: rgba(0, 0, 0, 0.3);
-            border: 1px solid #444;
-            border-radius: 6px;
-            color: #e0e0e0;
-            font-family: inherit;
-            font-size: 13px;
-            box-sizing: border-box;
-            transition: all 0.3s;
-        }
-
-        .form-group input[type="text"]:focus,
-        .form-group input[type="email"]:focus,
-        .form-group input[type="password"]:focus,
-        .form-group input[type="number"]:focus,
-        .form-group select:focus,
-        .form-group textarea:focus {
-            outline: none;
-            border-color: #2979ff;
-            background: rgba(41, 121, 255, 0.1);
-            box-shadow: 0 0 0 3px rgba(41, 121, 255, 0.1);
-        }
-
-        .form-group textarea {
-            resize: vertical;
-            min-height: 80px;
-        }
-
-        .form-description {
-            font-size: 12px;
-            color: #999;
-            margin-top: 5px;
-        }
-
-        /* Checkbox & Toggle Styles */
-        .checkbox-group,
-        .toggle-group {
-            display: flex;
-            align-items: center;
-            margin: 15px 0;
-            gap: 12px;
-        }
-
-        .checkbox-group input[type="checkbox"],
-        .toggle-group input[type="checkbox"] {
-            width: 20px;
-            height: 20px;
-            cursor: pointer;
-            accent-color: #2979ff;
-        }
-
-        .checkbox-group label,
-        .toggle-group label {
-            margin: 0;
-            cursor: pointer;
-            color: #e0e0e0;
-            font-size: 13px;
-            flex: 1;
-        }
-
-        /* Nested sections */
-        .settings-subsection {
-            margin-left: 0;
-            padding: 15px;
-            background: rgba(0, 0, 0, 0.2);
-            border-radius: 6px;
-            border-left: 3px solid #2979ff;
-            margin-top: 15px;
-            display: none;
-        }
-
-        .settings-subsection.visible {
-            display: block;
-        }
-
-        .settings-subsection h4 {
-            margin-top: 0;
-            color: #64b5f6;
-        }
-
-        /* Button Styles */
-        .settings-actions {
-            display: flex;
-            gap: 12px;
-            margin-top: 30px;
-            flex-wrap: wrap;
-        }
-
-        .btn-settings {
-            padding: 12px 24px;
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
-            font-weight: bold;
-            font-size: 14px;
-            transition: all 0.3s;
-        }
-
-        .btn-save {
-            background: linear-gradient(135deg, #4caf50, #388e3c);
+        button[type="submit"] {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
-            flex: 1;
-            min-width: 150px;
+            padding: 12px 30px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            margin-top: 20px;
+            width: 100%;
         }
 
-        .btn-save:hover {
-            background: linear-gradient(135deg, #388e3c, #2e7d32);
-            box-shadow: 0 4px 12px rgba(76, 175, 80, 0.3);
+        button[type="submit"]:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 16px rgba(102, 126, 234, 0.4);
         }
 
-        .btn-reset {
-            background: #333;
-            color: #ccc;
-            border: 1px solid #555;
+        button[type="submit"]:active {
+            transform: translateY(0);
         }
 
-        .btn-reset:hover {
-            background: #444;
-        }
-
-        /* Alert Messages */
-        .alert {
-            padding: 15px;
+        .notification {
+            padding: 15px 20px;
             border-radius: 8px;
             margin-bottom: 20px;
-            border-left: 4px solid;
             display: none;
         }
 
-        .alert.show {
+        .notification.success {
+            background: #c8e6c9;
+            color: #2e7d32;
             display: block;
         }
 
-        .alert-success {
-            background: rgba(76, 175, 80, 0.1);
-            border-left-color: #4caf50;
-            color: #81c784;
+        .notification.error {
+            background: #ffcdd2;
+            color: #c62828;
+            display: block;
         }
 
-        .alert-error {
-            background: rgba(211, 47, 47, 0.1);
-            border-left-color: #d32f2f;
-            color: #ef5350;
+        .divider {
+            height: 1px;
+            background: #f0f0f0;
+            margin: 30px 0;
         }
 
-        /* Response Slider */
-        .slider-container {
-            margin: 20px 0;
+        .info-box {
+            background: #e3f2fd;
+            border-left: 4px solid #2196F3;
+            padding: 15px;
+            border-radius: 4px;
+            font-size: 13px;
+            color: #1565c0;
+            margin: 15px 0;
         }
 
-        .slider {
-            width: 100%;
-            height: 6px;
-            border-radius: 3px;
-            background: #444;
-            outline: none;
-            -webkit-appearance: none;
+        .storage-info {
+            background: #f5f5f5;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
         }
 
-        .slider::-webkit-slider-thumb {
-            -webkit-appearance: none;
-            appearance: none;
-            width: 20px;
-            height: 20px;
-            border-radius: 50%;
-            background: #2979ff;
-            cursor: pointer;
-            box-shadow: 0 2px 8px rgba(41, 121, 255, 0.3);
-        }
-
-        .slider::-moz-range-thumb {
-            width: 20px;
-            height: 20px;
-            border-radius: 50%;
-            background: #2979ff;
-            cursor: pointer;
-            border: none;
-            box-shadow: 0 2px 8px rgba(41, 121, 255, 0.3);
-        }
-
-        .slider-value {
+        .storage-stat {
             display: flex;
             justify-content: space-between;
-            align-items: center;
-            margin-top: 8px;
-            font-size: 12px;
-            color: #999;
+            padding: 5px 0;
+            font-size: 13px;
         }
 
-        /* Responsive */
-        @media (max-width: 768px) {
-            .settings-container {
-                padding: 15px;
-            }
-
-            .form-row {
-                grid-template-columns: 1fr;
-            }
-
-            .settings-tabs {
-                overflow-x: auto;
-            }
-
-            .settings-section {
-                padding: 15px;
-            }
-
-            .settings-actions {
-                flex-direction: column;
-            }
-
-            .btn-settings {
-                width: 100%;
-            }
+        .storage-stat strong {
+            color: #667eea;
         }
 
-        .help-text {
-            color: #888;
-            font-size: 12px;
-            margin-top: 5px;
+        .cleanup-button {
+            background: #ff9800;
+            color: white;
+            padding: 10px 15px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            margin-top: 10px;
+            transition: background 0.3s;
         }
 
-        .nav-back {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            color: #2979ff;
-            text-decoration: none;
-            margin-bottom: 20px;
+        .cleanup-button:hover {
+            background: #f57c00;
+        }
+
+        .loading {
+            display: none;
+            color: #667eea;
             font-size: 14px;
-            transition: all 0.3s;
+            margin-top: 10px;
         }
 
-        .nav-back:hover {
-            color: #64b5f6;
+        .loading.active {
+            display: block;
         }
     </style>
 </head>
 
 <body>
-    <div class="navbar">
-        <div class="brand">⚙️ ME Camera Settings</div>
-        <div class="nav-menu" id="navMenu">
-            <a href="/">← Dashboard</a>
-            <a href="/multicam">📡 Devices</a>
-            <a href="/logout">Logout</a>
-        </div>
-    </div>
-
-    <div class="settings-container">
-        <div class="settings-header">
-            <h1>Configuration & Settings</h1>
-            <p>Manage device settings, emergency contacts, and camera preferences</p>
+    <div class="container">
+        <div class="header">
+            <h1>⚙️ Configuration</h1>
+            <button class="btn-back" onclick="window.location.href='/'">← Back to Dashboard</button>
         </div>
 
-        {% if error %}
-        <div class="alert alert-error show">{{ error }}</div>
-        {% endif %}
+        <div id="notification" class="notification"></div>
 
-        <form method="POST" action="{{ url_for('settings') }}" id="settingsForm">
-
-            <!-- Settings Navigation Tabs -->
-            <div class="settings-tabs">
-                <button type="button" class="settings-tab-btn active" onclick="switchTab('device')">📱 Device</button>
-                <button type="button" class="settings-tab-btn" onclick="switchTab('emergency')">🚨 Emergency</button>
-                <button type="button" class="settings-tab-btn" onclick="switchTab('camera')">📷 Camera</button>
-                <button type="button" class="settings-tab-btn" onclick="switchTab('storage')">💾 Storage</button>
-                <button type="button" class="settings-tab-btn" onclick="switchTab('detection')">🎯 Detection</button>
-                <button type="button" class="settings-tab-btn" onclick="switchTab('notifications')">📧
-                    Notifications</button>
-            </div>
-
-            <!-- DEVICE TAB -->
-            <div id="device" class="settings-tabs-content active">
-                <div class="settings-section">
-                    <h3>📱 Device Information</h3>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>Device Name</label>
-                            <input type="text" name="device_name" value="{{ config.get('device_name', 'ME_CAM_1') }}"
-                                placeholder="My Camera">
-                            <p class="form-description">Friendly name for this device</p>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="settings-section">
-                    <h3>🔧 System Integration</h3>
-                    <div class="toggle-group">
-                        <input type="checkbox" id="wifi_enabled" name="wifi_enabled" {% if config.get('wifi_enabled')
-                            %}checked{% endif %}>
-                        <label for="wifi_enabled">WiFi Configuration</label>
-                    </div>
-                    <div class="toggle-group">
-                        <input type="checkbox" id="bluetooth_enabled" name="bluetooth_enabled" {% if
-                            config.get('bluetooth_enabled') %}checked{% endif %}>
-                        <label for="bluetooth_enabled">Bluetooth Support</label>
-                    </div>
-                </div>
-            </div>
-
-            <!-- EMERGENCY TAB -->
-            <div id="emergency" class="settings-tabs-content">
-                <div class="settings-section" style="border: 2px solid #d32f2f;">
-                    <h3>🚨 Emergency Contacts</h3>
-                    <p style="color: #ff6b6b; margin-bottom: 15px;">Configure contacts for medical emergencies and
-                        security alerts</p>
-
-                    <div class="form-row full">
-                        <div class="form-group">
-                            <label>Device Location</label>
-                            <input type="text" name="device_location" value="{{ config.get('device_location', '') }}"
-                                placeholder="e.g., Living Room, Front Door">
-                            <p class="form-description">Included in emergency alerts</p>
-                        </div>
-                    </div>
-
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>🏥 Primary Emergency Contact (Medical)</label>
-                            <input type="text" name="emergency_primary_contact"
-                                value="{{ config.get('emergency_primary_contact', config.get('emergency_phone', '')) }}"
-                                placeholder="+1-555-0123">
-                            <p class="form-description">For medical emergencies. Use SMS gateway: 5551234567@vtext.com
-                            </p>
-                        </div>
-                        <div class="form-group">
-                            <label>🔒 Security Email</label>
-                            <input type="email" name="owner_email"
-                                value="{{ config.get('owner_email', config.get('email', {}).get('to_address', '')) }}"
-                                placeholder="owner@example.com">
-                            <p class="form-description">Receives security alerts</p>
-                        </div>
-                    </div>
-
-                    <div class="form-row full">
-                        <div class="form-group">
-                            <label>Additional Security Contacts</label>
-                            <input type="text" name="security_contacts"
-                                value="{{ ','.join(config.get('security_contacts', [])) }}"
-                                placeholder="email1@example.com, email2@example.com">
-                            <p class="form-description">Comma-separated for police/insurance</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- CAMERA TAB -->
-            <div id="camera" class="settings-tabs-content">
-                <div class="settings-section">
-                    <h3>📷 Camera Settings</h3>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>Streaming Resolution</label>
-                            <select name="camera_resolution">
-                                <option value="640x480" {% if config.get('camera', {}).get('resolution', '640x480'
-                                    )=='640x480' %}selected{% endif %}>640x480 (Fast)</option>
-                                <option value="1280x720" {% if config.get('camera', {}).get('resolution')=='1280x720'
-                                    %}selected{% endif %}>1280x720 (Balanced)</option>
-                                <option value="1920x1080" {% if config.get('camera', {}).get('resolution')=='1920x1080'
-                                    %}selected{% endif %}>1920x1080 (High-Quality)</option>
-                            </select>
-                            <p class="form-description">Lower = faster streaming, less bandwidth</p>
-                        </div>
-                        <div class="form-group">
-                            <label>Recording Resolution</label>
-                            <select name="recording_resolution">
-                                <option value="1280x720" {% if config.get('camera',
-                                    {}).get('recording_resolution', '1280x720' )=='1280x720' %}selected{% endif %}>
-                                    1280x720</option>
-                                <option value="1920x1080" {% if config.get('camera',
-                                    {}).get('recording_resolution')=='1920x1080' %}selected{% endif %}>1920x1080
-                                </option>
-                            </select>
-                            <p class="form-description">Stored video resolution</p>
-                        </div>
-                    </div>
-
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>Stream FPS</label>
-                            <select name="stream_fps">
-                                <option value="15" {% if config.get('camera', {}).get('stream_fps', 15)==15 %}selected{%
-                                    endif %}>15 FPS (Lower Latency)</option>
-                                <option value="24" {% if config.get('camera', {}).get('stream_fps')==24 %}selected{%
-                                    endif %}>24 FPS</option>
-                                <option value="30" {% if config.get('camera', {}).get('stream_fps')==30 %}selected{%
-                                    endif %}>30 FPS (Smooth)</option>
-                            </select>
-                            <p class="form-description">Higher = smoother but more bandwidth</p>
-                        </div>
-                        <div class="form-group">
-                            <label>Recording Duration</label>
-                            <input type="number" name="recording_duration" min="5" max="120"
-                                value="{{ config.get('camera', {}).get('recording_duration', 30) }}">
-                            <p class="form-description">Seconds per clip (5-120)</p>
-                        </div>
-                    </div>
-
-                    <div class="toggle-group">
-                        <input type="checkbox" id="use_fast_streamer" name="use_fast_streamer" {% if
-                            config.get('camera', {}).get('use_fast_streamer', True) %}checked{% endif %}>
-                        <label for="use_fast_streamer">Use Fast Streaming Mode (Recommended)</label>
-                    </div>
-                </div>
-            </div>
-
-            <!-- STORAGE TAB -->
-            <div id="storage" class="settings-tabs-content">
-                <div class="settings-section">
-                    <h3>💾 Storage Management</h3>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>Retention Days</label>
-                            <input type="number" name="storage_retention_days" min="1" max="90"
-                                value="{{ config.get('storage', {}).get('retention_days', 7) }}">
-                            <p class="form-description">Auto-delete older recordings</p>
-                        </div>
-                        <div class="form-group">
-                            <label>Max Storage (GB)</label>
-                            <input type="number" name="max_storage_gb" min="1" step="0.5"
-                                value="{{ config.get('storage', {}).get('max_storage_gb', 10) }}">
-                            <p class="form-description">Stop recording when reached</p>
-                        </div>
-                    </div>
-
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>Cleanup Threshold (%)</label>
-                            <input type="number" name="cleanup_threshold" min="50" max="95"
-                                value="{{ config.get('storage', {}).get('cleanup_when_full_percent', 90) }}">
-                            <p class="form-description">Trigger cleanup at this usage level</p>
-                        </div>
-                    </div>
-
-                    <div class="toggle-group">
-                        <input type="checkbox" id="motion_recording_enabled" name="motion_recording_enabled" {% if
-                            config.get('storage', {}).get('motion_only', True) %}checked{% endif %}>
-                        <label for="motion_recording_enabled">Motion-Triggered Recording Only</label>
-                    </div>
-                    <div class="toggle-group">
-                        <input type="checkbox" id="keep_newest_files" name="keep_newest_files" {% if
-                            config.get('storage', {}).get('keep_newest_files', True) %}checked{% endif %}>
-                        <label for="keep_newest_files">Keep Newest Files When Cleaning</label>
-                    </div>
-                    <div class="toggle-group">
-                        <input type="checkbox" id="organize_by_date" name="organize_by_date" {% if config.get('storage',
-                            {}).get('organize_by_date', True) %}checked{% endif %}>
-                        <label for="organize_by_date">Organize Files by Date</label>
-                    </div>
-                    <div class="toggle-group">
-                        <input type="checkbox" id="thumbnail_generation" name="thumbnail_generation" {% if
-                            config.get('storage', {}).get('thumbnail_generation', True) %}checked{% endif %}>
-                        <label for="thumbnail_generation">Generate Thumbnails</label>
-                    </div>
-                </div>
-            </div>
-
-            <!-- DETECTION TAB -->
-            <div id="detection" class="settings-tabs-content">
-                <div class="settings-section">
-                    <h3>🎯 Motion Detection</h3>
+        <form class="config-form" id="configForm">
+            <!-- Device Information -->
+            <div class="form-section">
+                <div class="section-title">📱 Device Information</div>
+                <div class="form-row">
                     <div class="form-group">
-                        <label>Motion Sensitivity</label>
-                        <input type="range" class="slider" name="motion_sensitivity" min="0.1" max="1.0" step="0.1"
-                            value="{{ config.get('detection', {}).get('sensitivity', 0.6) }}" id="sensitivitySlider">
-                        <div class="slider-value">
-                            <span>Low</span>
-                            <span id="sensitivityValue">0.6</span>
-                            <span>High</span>
-                        </div>
-                        <p class="form-description">Higher = more sensitive to motion</p>
+                        <label>Device Name</label>
+                        <input type="text" name="device_name" value="{{ device_name }}" required>
+                        <div class="help-text">Name your camera (e.g., "Front Door Camera")</div>
                     </div>
-
                     <div class="form-group">
-                        <label>Motion Check Interval (seconds)</label>
-                        <input type="number" name="motion_check_interval" min="0.1" max="5" step="0.1"
-                            value="{{ config.get('camera', {}).get('motion_check_interval', 0.2) }}">
-                        <p class="form-description">How often to check for motion (lower = faster response)</p>
+                        <label>Device Location</label>
+                        <input type="text" name="device_location" value="{{ device_location }}">
+                        <div class="help-text">Physical location (e.g., "Front Porch")</div>
                     </div>
                 </div>
             </div>
 
-            <!-- NOTIFICATIONS TAB -->
-            <div id="notifications" class="settings-tabs-content">
-                <div class="settings-section">
-                    <h3>📧 Email Notifications</h3>
-                    <div class="toggle-group">
-                        <input type="checkbox" id="email_enabled" name="email_enabled" {% if config.get('email',
-                            {}).get('enabled', False) %}checked{% endif %}>
-                        <label for="email_enabled">Enable Email Notifications</label>
-                    </div>
+            <div class="divider"></div>
 
-                    <div class="settings-subsection" id="emailSettings">
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label>SMTP Server</label>
-                                <input type="text" name="smtp_server" placeholder="smtp.gmail.com"
-                                    value="{{ config.get('email', {}).get('smtp_server', '') }}">
-                            </div>
-                            <div class="form-group">
-                                <label>SMTP Port</label>
-                                <input type="number" name="smtp_port"
-                                    value="{{ config.get('email', {}).get('smtp_port', 587) }}">
-                            </div>
-                        </div>
-
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label>Email Username</label>
-                                <input type="email" name="email_username"
-                                    value="{{ config.get('email', {}).get('username', '') }}">
-                            </div>
-                            <div class="form-group">
-                                <label>Email Password</label>
-                                <input type="password" name="email_password" placeholder="App password recommended">
-                            </div>
-                        </div>
-
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label>From Address</label>
-                                <input type="email" name="email_from"
-                                    value="{{ config.get('email', {}).get('from_address', '') }}">
-                            </div>
-                            <div class="form-group">
-                                <label>Recipient Email</label>
-                                <input type="email" name="email_to"
-                                    value="{{ config.get('email', {}).get('to_address', '') }}">
-                            </div>
-                        </div>
-                    </div>
+            <!-- Emergency Settings -->
+            <div class="form-section">
+                <div class="section-title">🚨 Emergency Alerts</div>
+                <div class="form-group">
+                    <label>Emergency Phone Number</label>
+                    <input type="tel" name="emergency_phone" value="{{ emergency_phone }}" placeholder="+1234567890">
+                    <div class="help-text">Phone number to receive emergency alerts (include country code)</div>
                 </div>
-
-                <div class="settings-section">
-                    <h3>☁️ Google Drive Sync</h3>
-                    <div class="toggle-group">
-                        <input type="checkbox" id="gdrive_enabled" name="gdrive_enabled" {% if
-                            config.get('google_drive', {}).get('enabled', False) %}checked{% endif %}>
-                        <label for="gdrive_enabled">Enable Google Drive Upload</label>
+                <div class="form-group">
+                    <div class="checkbox-group">
+                        <input type="checkbox" name="send_motion_to_emergency" id="send_motion" {% if
+                            send_motion_to_emergency %}checked{% endif %}>
+                        <label for="send_motion" style="margin: 0; font-weight: 400;">Send motion alerts to emergency
+                            number</label>
                     </div>
-
-                    <div class="settings-subsection" id="gdriveSettings">
-                        <div class="form-group">
-                            <label>Google Drive Folder ID</label>
-                            <input type="text" name="gdrive_folder_id"
-                                value="{{ config.get('google_drive', {}).get('folder_id', '') }}"
-                                placeholder="Folder ID from shared link">
-                            <p class="form-description">Create a folder in Google Drive, share it, and paste the ID from
-                                the URL</p>
-                        </div>
-                    </div>
+                    <div class="help-text">Emergency alerts will be triggered when motion is detected</div>
+                </div>
+                <div class="info-box">
+                    💡 Configure your emergency service API endpoint in the code to actually send alerts. Currently logs
+                    to system.
                 </div>
             </div>
 
-            <!-- Save Actions -->
-            <div class="settings-actions">
-                <button type="submit" class="btn-settings btn-save">💾 Save Settings</button>
-                <button type="reset" class="btn-settings btn-reset" onclick="location.reload()">↻ Reset Form</button>
+            <div class="divider"></div>
+
+            <!-- Motion Detection -->
+            <div class="form-section">
+                <div class="section-title">🎯 Motion Detection</div>
+                <div class="form-group">
+                    <label>Motion Detection Threshold</label>
+                    <input type="number" name="motion_threshold" value="{{ motion_threshold }}" min="0" max="1"
+                        step="0.1">
+                    <div class="help-text">0.0 = very sensitive, 1.0 = not sensitive (default 0.5 = 50%)</div>
+                </div>
+                <div class="form-group">
+                    <div class="checkbox-group">
+                        <input type="checkbox" name="motion_record_enabled" id="motion_record" {% if
+                            motion_record_enabled %}checked{% endif %}>
+                        <label for="motion_record" style="margin: 0; font-weight: 400;">Record video when motion
+                            detected</label>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Record Duration (seconds)</label>
+                    <input type="number" name="motion_record_duration" value="{{ motion_record_duration }}" min="3"
+                        max="300">
+                    <div class="help-text">How long to record after motion is detected (3-300 seconds)</div>
+                </div>
             </div>
 
+            <div class="divider"></div>
+
+            <!-- Storage Management -->
+            <div class="form-section">
+                <div class="section-title">💾 Storage Management</div>
+                <div class="storage-info">
+                    <div class="storage-stat">
+                        <span>Total Storage:</span>
+                        <strong>{{ storage.total_gb }}GB</strong>
+                    </div>
+                    <div class="storage-stat">
+                        <span>Used:</span>
+                        <strong>{{ storage.used_gb }}GB</strong>
+                    </div>
+                    <div class="storage-stat">
+                        <span>Free:</span>
+                        <strong>{{ storage.free_gb }}GB</strong>
+                    </div>
+                    <div class="storage-stat">
+                        <span>Recording Count:</span>
+                        <strong>{{ storage.recording_count }}</strong>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Auto-Cleanup Old Recordings (days)</label>
+                    <input type="number" name="storage_cleanup_days" value="{{ storage_cleanup_days }}" min="1"
+                        max="365">
+                    <div class="help-text">Delete recordings older than this many days to free up space</div>
+                </div>
+
+                <button type="button" class="cleanup-button" onclick="cleanupOldRecordings()">
+                    🗑️ Cleanup Old Recordings Now
+                </button>
+                <div class="loading" id="cleanupLoading">Cleaning up...</div>
+            </div>
+
+            <div class="divider"></div>
+
+            <!-- Save Button -->
+            <button type="submit">💾 Save Configuration</button>
         </form>
-
-        <div style="text-align: center; margin-top: 40px; padding: 20px; border-top: 1px solid #333;">
-            <a href="/" class="nav-back">← Back to Dashboard</a>
-        </div>
     </div>
 
     <script>
-        function switchTab(tabName) {
-            // Hide all tabs
-            document.querySelectorAll('.settings-tabs-content').forEach(t => t.classList.remove('active'));
-            document.querySelectorAll('.settings-tab-btn').forEach(b => b.classList.remove('active'));
+        document.getElementById('configForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
 
-            // Show selected tab
-            const tab = document.getElementById(tabName);
-            const btn = event.target;
-            if (tab) {
-                tab.classList.add('active');
-                btn.classList.add('active');
+            const formData = {
+                device_name: document.querySelector('input[name="device_name"]').value,
+                device_location: document.querySelector('input[name="device_location"]').value,
+                emergency_phone: document.querySelector('input[name="emergency_phone"]').value,
+                send_motion_to_emergency: document.getElementById('send_motion').checked,
+                motion_threshold: parseFloat(document.querySelector('input[name="motion_threshold"]').value),
+                motion_record_enabled: document.getElementById('motion_record').checked,
+                motion_record_duration: parseInt(document.querySelector('input[name="motion_record_duration"]').value),
+                storage_cleanup_days: parseInt(document.querySelector('input[name="storage_cleanup_days"]').value)
+            };
+
+            try {
+                const response = await fetch('/api/config/update', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(formData)
+                });
+
+                const data = await response.json();
+                if (data.ok) {
+                    showNotification('✅ Configuration saved successfully!', 'success');
+                    setTimeout(() => window.location.href = '/', 2000);
+                } else {
+                    showNotification('❌ Error: ' + (data.error || 'Failed to save'), 'error');
+                }
+            } catch (err) {
+                showNotification('❌ Error: ' + err.message, 'error');
+            }
+        });
+
+        function showNotification(message, type) {
+            const notif = document.getElementById('notification');
+            notif.textContent = message;
+            notif.className = `notification ${type}`;
+            setTimeout(() => notif.className = 'notification', 4000);
+        }
+
+        async function cleanupOldRecordings() {
+            const days = parseInt(document.querySelector('input[name="storage_cleanup_days"]').value);
+            const loading = document.getElementById('cleanupLoading');
+
+            loading.classList.add('active');
+
+            try {
+                const response = await fetch('/api/storage/cleanup', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ days })
+                });
+
+                const data = await response.json();
+                loading.classList.remove('active');
+
+                if (data.ok) {
+                    showNotification(`✅ Cleaned up: ${data.deleted} files, ${data.freed_mb}MB freed`, 'success');
+                    location.reload();
+                } else {
+                    showNotification('❌ Cleanup failed: ' + data.error, 'error');
+                }
+            } catch (err) {
+                loading.classList.remove('active');
+                showNotification('❌ Error: ' + err.message, 'error');
             }
         }
-
-        // Update sensitivity display
-        const slider = document.getElementById('sensitivitySlider');
-        if (slider) {
-            slider.addEventListener('input', function () {
-                document.getElementById('sensitivityValue').textContent = this.value;
-            });
-        }
-
-        // Show/hide email settings
-        const emailCheckbox = document.getElementById('email_enabled');
-        const emailSettings = document.getElementById('emailSettings');
-        if (emailCheckbox) {
-            emailCheckbox.addEventListener('change', function () {
-                emailSettings.classList.toggle('visible', this.checked);
-            });
-            // Initial state
-            emailSettings.classList.toggle('visible', emailCheckbox.checked);
-        }
-
-        // Show/hide gdrive settings
-        const gdriveCheckbox = document.getElementById('gdrive_enabled');
-        const gdriveSettings = document.getElementById('gdriveSettings');
-        if (gdriveCheckbox) {
-            gdriveCheckbox.addEventListener('change', function () {
-                gdriveSettings.classList.toggle('visible', this.checked);
-            });
-            // Initial state
-            gdriveSettings.classList.toggle('visible', gdriveCheckbox.checked);
-        }
-
-        // Form submission feedback
-        document.getElementById('settingsForm').addEventListener('submit', function () {
-            const btn = this.querySelector('.btn-save');
-            btn.disabled = true;
-            btn.textContent = '⏳ Saving...';
-        });
     </script>
-</body>
-
-</html>
-<label for="emergency_mode">Emergency Detection Mode</label>
-<select id="emergency_mode" name="emergency_mode"
-    style="width: 100%; padding: 8px 12px; background: #0f0f0f; border: 1px solid #444; border-radius: 6px; color: #e0e0e0;">
-    <option value="manual" {% if config.get('emergency_mode', 'manual' )=='manual' %}selected{% endif %}>Manual Only
-        (SOS Button)</option>
-    <option value="medical" {% if config.get('emergency_mode')=='medical' %}selected{% endif %}>
-        Medical Monitoring (Motion + AI Analysis)</option>
-    <option value="security" {% if config.get('emergency_mode')=='security' %}selected{% endif %}>
-        Security Mode (Intrusion Detection)</option>
-    <option value="both" {% if config.get('emergency_mode')=='both' %}selected{% endif %}>Both
-        Medical & Security</option>
-</select>
-<p class="help-text">Manual = Only send alerts when SOS button pressed. Medical/Security = Automatic
-    alerts based on AI detection.</p>
-</div>
-</div>
-
-<!-- Camera Settings Section -->
-<div class="settings-section">
-    <h3>📹 Camera & Recording Settings</h3>
-
-    <div class="form-group">
-        <label for="device_name">Device Name</label>
-        <input type="text" id="device_name" name="device_name" value="{{ config.get('device_name', 'ME_CAM_1') }}"
-            placeholder="Living Room Camera">
-        <p class="help-text">Friendly name for this camera (appears on dashboard and alerts)</p>
-    </div>
-
-    <div class="form-group">
-        <label for="camera_resolution">Stream Resolution</label>
-        <select id="camera_resolution" name="camera_resolution"
-            style="width: 100%; padding: 8px 12px; background: #0f0f0f; border: 1px solid #444; border-radius: 6px; color: #e0e0e0;">
-            <option value="320x240" {% if config.get('camera', {}).get('resolution')=='320x240' %}selected{% endif %}>
-                320x240 (Fastest - Low Quality)</option>
-            <option value="640x480" {% if config.get('camera', {}).get('resolution', '640x480' )=='640x480' %}selected{%
-                endif %}>640x480 (Recommended for Pi Zero 2 W)</option>
-            <option value="1280x720" {% if config.get('camera', {}).get('resolution')=='1280x720' %}selected{% endif %}>
-                1280x720 (HD - Slower)</option>
-            <option value="1536x864" {% if config.get('camera', {}).get('resolution')=='1536x864' %}selected{% endif %}>
-                1536x864 (High Quality - May Lag)</option>
-        </select>
-        <p class="help-text">Lower resolution = faster, smoother stream. Higher = better quality but may lag
-            on Pi Zero 2 W.</p>
-    </div>
-
-    <div class="form-group">
-        <label for="recording_resolution">Recording Resolution</label>
-        <select id="recording_resolution" name="recording_resolution"
-            style="width: 100%; padding: 8px 12px; background: #0f0f0f; border: 1px solid #444; border-radius: 6px; color: #e0e0e0;">
-            <option value="640x480" {% if config.get('camera', {}).get('recording_resolution', '1280x720' )=='640x480'
-                %}selected{% endif %}>640x480 (Fast, Smaller Files)</option>
-            <option value="1280x720" {% if config.get('camera', {}).get('recording_resolution', '1280x720' )=='1280x720'
-                %}selected{% endif %}>1280x720 (HD - Recommended)</option>
-            <option value="1920x1080" {% if config.get('camera', {}).get('recording_resolution')=='1920x1080'
-                %}selected{% endif %}>1920x1080 (Full HD -
-                Large Files)</option>
-        </select>
-        <p class="help-text">Resolution for motion-triggered recordings saved to SD card</p>
-    </div>
-
-    <div class="form-group">
-        <label for="recording_duration">Recording Duration (seconds)</label>
-        <input type="number" id="recording_duration" name="recording_duration" min="10" max="300"
-            value="{{ config.get('camera', {}).get('recording_duration', 30) }}">
-        <p class="help-text">How long to record when motion detected (10-300 seconds)</p>
-    </div>
-
-    <div class="form-group">
-        <label for="motion_sensitivity">Motion Sensitivity</label>
-        <select id="motion_sensitivity" name="motion_sensitivity"
-            style="width: 100%; padding: 8px 12px; background: #0f0f0f; border: 1px solid #444; border-radius: 6px; color: #e0e0e0;">
-            <option value="0.3" {% if config.get('detection', {}).get('sensitivity')==0.3 %}selected{% endif %}>High
-                (More Sensitive - May Trigger Often)</option>
-            <option value="0.6" {% if config.get('detection', {}).get('sensitivity', 0.6)==0.6 %}selected{% endif %}>
-                Medium (Recommended)</option>
-            <option value="0.9" {% if config.get('detection', {}).get('sensitivity')==0.9 %}selected{% endif %}>Low
-                (Less Sensitive - Only Major Motion)</option>
-        </select>
-        <p class="help-text">How sensitive motion detection is to changes</p>
-    </div>
-
-    <div class="checkbox-group">
-        <input type="checkbox" id="motion_recording_enabled" name="motion_recording_enabled" {% if config.get('storage',
-            {}).get('motion_only', True) %}checked{% endif %}>
-        <label for="motion_recording_enabled">Enable Motion Recording to SD Card</label>
-    </div>
-    <p class="help-text">Save video clips to SD card when motion detected</p>
-
-    <div class="form-group">
-        <label for="storage_retention_days">Storage Retention (days)</label>
-        <input type="number" id="storage_retention_days" name="storage_retention_days" min="1" max="365"
-            value="{{ config.get('storage', {}).get('retention_days', 7) }}">
-        <p class="help-text">Automatically delete recordings older than this many days (1-365)</p>
-    </div>
-
-    <div class="form-group">
-        <label for="max_storage_gb">Maximum Storage (GB)</label>
-        <input type="number" id="max_storage_gb" name="max_storage_gb" min="1" max="1000"
-            value="{{ config.get('storage', {}).get('max_storage_gb', 10) }}" step="0.1">
-        <p class="help-text">Maximum storage space for recordings before auto-cleanup</p>
-    </div>
-
-    <div class="form-group">
-        <label for="cleanup_threshold">Auto-Cleanup Threshold (%)</label>
-        <input type="number" id="cleanup_threshold" name="cleanup_threshold" min="50" max="99"
-            value="{{ config.get('storage', {}).get('cleanup_when_full_percent', 90) }}">
-        <p class="help-text">Start deleting oldest files when storage reaches this percentage</p>
-    </div>
-
-    <div class="checkbox-group">
-        <input type="checkbox" id="keep_newest_files" name="keep_newest_files" {% if config.get('storage',
-            {}).get('keep_newest_files', True) %}checked{% endif %}>
-        <label for="keep_newest_files">Keep Newest Files When Cleaning Up</label>
-    </div>
-    <p class="help-text">Delete oldest recordings first during auto-cleanup</p>
-
-    <div class="checkbox-group">
-        <input type="checkbox" id="organize_by_date" name="organize_by_date" {% if config.get('storage',
-            {}).get('organize_by_date', True) %}checked{% endif %}>
-        <label for="organize_by_date">Organize Recordings by Date (YYYY/MM/DD folders)</label>
-    </div>
-
-    <div class="checkbox-group">
-        <input type="checkbox" id="thumbnail_generation" name="thumbnail_generation" {% if config.get('storage',
-            {}).get('thumbnail_generation', True) %}checked{% endif %}>
-        <label for="thumbnail_generation">Generate Thumbnails for Videos</label>
-    </div>
-    <p class="help-text">Create preview thumbnails (uses extra storage & CPU)</p>
-</div>
-
-<!-- Performance Settings Section -->
-<div class="settings-section" style="border: 2px solid #4CAF50;">
-    <h3>⚡ Performance Settings</h3>
-    <p style="color: #4CAF50; font-size: 13px; margin-top: 0;">
-        <strong>Why is this important?</strong> The default streaming method spawns a new subprocess for
-        each frame (500-1000ms delay).
-        Fast streaming uses continuous capture like your Tkinter GUI (30-60ms per frame) - 10-15x faster!
-    </p>
-
-    <div class="checkbox-group">
-        <input type="checkbox" id="use_fast_streamer" name="use_fast_streamer" {% if config.get('camera',
-            {}).get('use_fast_streamer', True) %}checked{% endif %}>
-        <label for="use_fast_streamer"><strong>Use Fast Streaming (picamera2) - RECOMMENDED</strong></label>
-    </div>
-    <p class="help-text">
-        <span style="color: #4CAF50;">✓ FAST:</span> Continuous capture, 15-30 FPS, instant response<br>
-        <span style="color: #ff9800;">✗ SLOW:</span> Subprocess per frame, 1-2 FPS, high latency<br>
-        Requires: <code>sudo apt install -y python3-picamera2</code>
-    </p>
-
-    <div class="form-group">
-        <label for="stream_fps">Target Stream FPS</label>
-        <input type="number" id="stream_fps" name="stream_fps" min="1" max="30"
-            value="{{ config.get('camera', {}).get('stream_fps', 15) }}">
-        <p class="help-text">Frames per second for live stream (only applies to fast streaming mode)</p>
-    </div>
-
-    <div class="form-group">
-        <label for="motion_check_interval">Motion Check Interval (seconds)</label>
-        <input type="number" id="motion_check_interval" name="motion_check_interval" min="0.1" max="5"
-            value="{{ config.get('camera', {}).get('motion_check_interval', 0.2) }}" step="0.1">
-        <p class="help-text">How often to check for motion (lower = faster detection, more CPU)</p>
-    </div>
-</div>
-
-<!-- Email Notifications Section -->
-<div class="settings-section">
-    <h3>📧 Email Notifications</h3>
-
-    <div class="checkbox-group">
-        <input type="checkbox" id="email_enabled" name="email_enabled" {% if config.get('email', {}).get('enabled')
-            %}checked{% endif %}>
-        <label for="email_enabled">Enable Email Alerts</label>
-    </div>
-    <p class="help-text">Send motion detection alerts via email</p>
-
-    <div class="nested-section" id="email_config">
-        <div class="form-group">
-            <label for="smtp_server">SMTP Server</label>
-            <input type="text" id="smtp_server" name="smtp_server"
-                value="{{ config.get('email', {}).get('smtp_server', '') }}" placeholder="smtp.gmail.com">
-        </div>
-
-        <div class="form-group">
-            <label for="smtp_port">SMTP Port</label>
-            <input type="number" id="smtp_port" name="smtp_port"
-                value="{{ config.get('email', {}).get('smtp_port', 587) }}">
-        </div>
-
-        <div class="form-row">
-            <div class="form-group">
-                <label>Email Username</label>
-                <input type="email" name="email_username" value="{{ config.get('email', {}).get('username', '') }}">
-            </div>
-            <div class="form-group">
-                <label>Email Password</label>
-                <input type="password" name="email_password" placeholder="App password">
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Google Drive Section -->
-<div class="settings-section">
-    <h3>☁️ Google Drive Backup</h3>
-
-    <div class="toggle-group">
-        <input type="checkbox" id="gdrive_enabled" name="gdrive_enabled" {% if config.get('google_drive',
-            {}).get('enabled') %}checked{% endif %}>
-        <label for="gdrive_enabled">Enable Google Drive Backup</label>
-    </div>
-
-    <div class="settings-subsection" id="gdriveSettings">
-        <div class="form-group">
-            <label>Google Drive Folder ID</label>
-            <input type="text" name="gdrive_folder_id" value="{{ config.get('google_drive', {}).get('folder_id', '') }}"
-                placeholder="Get from gdrive.google.com">
-            <p class="form-description">Create a folder in Drive, open it, and copy the ID from the URL</p>
-        </div>
-    </div>
-</div>
-
-<!-- Submit Button -->
-<div class="settings-actions">
-    <button type="submit" class="btn-settings btn-save">💾 Save Settings</button>
-    <button type="reset" class="btn-settings btn-reset" onclick="location.reload()">↻ Reset Form</button>
-</div>
-</form>
-
-<div style="text-align: center; margin-top: 40px; padding: 20px; border-top: 1px solid #333;">
-    <a href="/" class="nav-back">← Back to Dashboard</a>
-</div>
-</div>
-
-<script>
-    function switchTab(tabName) {
-        document.querySelectorAll('.settings-tabs-content').forEach(t => t.classList.remove('active'));
-        document.querySelectorAll('.settings-tab-btn').forEach(b => b.classList.remove('active'));
-
-        const tab = document.getElementById(tabName);
-        const btn = event.target;
-        if (tab) {
-            tab.classList.add('active');
-            btn.classList.add('active');
-        }
-    }
-
-    const slider = document.getElementById('sensitivitySlider');
-    if (slider) {
-        slider.addEventListener('input', function () {
-            document.getElementById('sensitivityValue').textContent = this.value;
-        });
-    }
-
-    const emailCheckbox = document.getElementById('email_enabled');
-    const emailSettings = document.getElementById('emailSettings');
-    if (emailCheckbox) {
-        emailCheckbox.addEventListener('change', function () {
-            emailSettings.classList.toggle('visible', this.checked);
-        });
-        emailSettings.classList.toggle('visible', emailCheckbox.checked);
-    }
-
-    const gdriveCheckbox = document.getElementById('gdrive_enabled');
-    const gdriveSettings = document.getElementById('gdriveSettings');
-    if (gdriveCheckbox) {
-        gdriveCheckbox.addEventListener('change', function () {
-            gdriveSettings.classList.toggle('visible', this.checked);
-        });
-        gdriveSettings.classList.toggle('visible', gdriveCheckbox.checked);
-    }
-
-    document.getElementById('settingsForm').addEventListener('submit', function () {
-        const btn = this.querySelector('.btn-save');
-        btn.disabled = true;
-        btn.textContent = '⏳ Saving...';
-    });
-</script>
 </body>
 
 </html>

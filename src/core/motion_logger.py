@@ -55,12 +55,21 @@ def log_motion_event(event_type="motion", confidence=0.0, details=None):
             if len(events) > 1000:
                 events = events[-1000:]
             
+            # Generate unique ID from timestamp
+            event_id = f"evt_{int(datetime.now().timestamp() * 1000)}"
+
+            video_path = None
+            if details and details.get('video_path'):
+                video_path = details.get('video_path')
+
             event = {
+                "id": event_id,
                 "timestamp": datetime.now().isoformat(),
                 "unix_timestamp": datetime.now().timestamp(),
                 "type": event_type,
                 "confidence": round(confidence, 3),
-                "details": details or {}
+                "details": details or {},
+                "has_video": bool(video_path)
             }
             
             events.append(event)
