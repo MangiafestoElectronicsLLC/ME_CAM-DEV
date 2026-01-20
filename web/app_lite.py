@@ -132,7 +132,7 @@ def create_lite_app(pi_model, camera_config):
             logger.error(f"[MOTION] Load events failed: {e}")
         return []
 
-    def save_motion_clip(camera_obj, frame, duration_sec=3):
+    def save_motion_clip(camera_obj, frame, duration_sec=5):
         """Save a short MP4 clip when motion is detected"""
         try:
             import cv2
@@ -143,30 +143,86 @@ def create_lite_app(pi_model, camera_config):
             filename = f"motion_{timestamp}.mp4"
             filepath = os.path.join(recordings_path, filename)
 
-            # Prepare video writer (approx 20 FPS)
+            # Prepare video writer with H.264 codec for browser compatibility
             height, width, _ = frame.shape
-            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-            writer = cv2.VideoWriter(filepath, fourcc, 20.0, (width, height))
+            # Use H.264 codec (x264) which all browsers support
+            fourcc = cv2.VideoWriter_fourcc(*'avc1')  # H.264 / AVC
+            fps = 15.0  # Balanced FPS for Pi Zero
+            writer = cv2.VideoWriter(filepath, fourcc, fps, (width, height))
+
+            if not writer.isOpened():
+                # Fallback to mp4v if H.264 not available
+                logger.warning("[MOTION] H.264 not available, using mp4v")
+                fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                writer = cv2.VideoWriter(filepath, fourcc, fps, (width, height))
 
             # Write initial frame
             writer.write(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
 
             # Capture additional frames for duration_sec seconds
-            frame_count = int(duration_sec * 20)
-            for _ in range(frame_count):
+            frame_count = int(duration_sec * fps)
+            for i in range(frame_count):
                 try:
                     next_frame = camera_obj.capture_array()
                     writer.write(cv2.cvtColor(next_frame, cv2.COLOR_RGB2BGR))
+                    time.sleep(1.0 / fps)  # Control frame rate
                 except Exception as e:
-                    logger.debug(f"[MOTION] Clip capture error: {e}")
+                    logger.debug(f"[MOTION] Frame {i} capture error: {e}")
                     break
-                time.sleep(0.05)
 
             writer.release()
-            logger.info(f"[MOTION] Saved clip: {filename}")
+            logger.info(f"[MOTION] Saved {frame_count} frames to: {filename}")
             return filename
         except Exception as e:
             logger.error(f"[MOTION] Save clip failed: {e}")
+            return None
+    
+    def save_motion_clip_buffered(camera_obj, buffered_frames, duration_sec=5):
+        """Save a motion clip using pre-buffered frames + continue recording"""
+        try:
+            import cv2
+            recordings_path = os.path.join(BASE_DIR, "recordings")
+            os.makedirs(recordings_path, exist_ok=True)
+
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"motion_{timestamp}.mp4"
+            filepath = os.path.join(recordings_path, filename)
+
+            # Get dimensions from buffered frames
+            if not buffered_frames:
+                return None
+            
+            height, width, _ = buffered_frames[0].shape
+            fourcc = cv2.VideoWriter_fourcc(*'avc1')  # H.264
+            fps = 15.0
+            writer = cv2.VideoWriter(filepath, fourcc, fps, (width, height))
+
+            if not writer.isOpened():
+                logger.warning("[MOTION] H.264 not available, using mp4v")
+                fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                writer = cv2.VideoWriter(filepath, fourcc, fps, (width, height))
+
+            # Write buffered frames first (captures motion that already happened)
+            for frame in buffered_frames:
+                writer.write(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
+
+            # Continue capturing for remaining duration
+            additional_frames = int(duration_sec * fps) - len(buffered_frames)
+            for i in range(max(0, additional_frames)):
+                try:
+                    next_frame = camera_obj.capture_array()
+                    writer.write(cv2.cvtColor(next_frame, cv2.COLOR_RGB2BGR))
+                    time.sleep(1.0 / fps)
+                except Exception as e:
+                    logger.debug(f"[MOTION] Frame {i} capture error: {e}")
+                    break
+
+            writer.release()
+            total_frames = len(buffered_frames) + additional_frames
+            logger.info(f"[MOTION] Saved {total_frames} frames ({len(buffered_frames)} buffered) to: {filename}")
+            return filename
+        except Exception as e:
+            logger.error(f"[MOTION] Save buffered clip failed: {e}")
             return None
     
     def save_motion_snapshot(frame):
@@ -190,14 +246,27 @@ def create_lite_app(pi_model, camera_config):
             return None
     
     def delete_motion_event(event_id):
-        """Delete a specific motion event"""
+        """Delete a specific motion event and its video file"""
         try:
             events_path = os.path.join(BASE_DIR, "logs", "motion_events.json")
             if os.path.exists(events_path):
                 with open(events_path, 'r') as f:
                     events = json.load(f)
                 
-                # Find and remove
+                # Find event and delete its video file
+                event_to_delete = next((e for e in events if e.get('id') == event_id), None)
+                if event_to_delete:
+                    video_path = event_to_delete.get('details', {}).get('video_path')
+                    if video_path:
+                        # video_path is just filename like "motion_20260120_141043.mp4"
+                        full_path = os.path.join(BASE_DIR, "recordings", video_path)
+                        if os.path.exists(full_path):
+                            os.remove(full_path)
+                            logger.info(f"[MOTION] Deleted video file: {full_path}")
+                        else:
+                            logger.warning(f"[MOTION] Video file not found: {full_path}")
+                
+                # Remove from events list
                 events = [e for e in events if e.get('id') != event_id]
                 
                 with open(events_path, 'w') as f:
@@ -250,6 +319,37 @@ def create_lite_app(pi_model, camera_config):
                 return render_template('login.html', error="Invalid credentials")
         
         return render_template('login.html')
+    
+    @app.route("/register", methods=["GET", "POST"])
+    def register():
+        """User registration"""
+        if request.method == "POST":
+            username = request.form.get("username", "").strip()
+            password = request.form.get("password", "")
+            password_confirm = request.form.get("password_confirm", "")
+            
+            # Validation
+            if not username or len(username) < 3:
+                return render_template("register.html", error="Username must be at least 3 characters")
+            
+            if not password or len(password) < 6:
+                return render_template("register.html", error="Password must be at least 6 characters")
+            
+            if password != password_confirm:
+                return render_template("register.html", error="Passwords don't match")
+            
+            from src.core import user_exists, create_user
+            if user_exists(username):
+                return render_template("register.html", error="Username already exists")
+            
+            # Create user
+            if create_user(username, password):
+                logger.info(f"[AUTH] New user registered: {username}")
+                return render_template("register.html", success="Account created! Please login.")
+            else:
+                return render_template("register.html", error="Error creating account")
+        
+        return render_template("register.html")
     
     @app.route("/logout")
     def logout():
@@ -362,8 +462,57 @@ def create_lite_app(pi_model, camera_config):
         if 'user' not in session:
             return jsonify({'error': 'Not authenticated'}), 401
         
-        events = get_motion_events()
-        return jsonify({'events': events, 'count': len(events)})
+        try:
+            events = get_motion_events()
+            
+            # Calculate statistics
+            from datetime import datetime, timedelta
+            now = datetime.now()
+            today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            
+            total = len(events)
+            today_count = 0
+            latest_time = None
+            by_type = {}
+            
+            for event in events:
+                # Count by type
+                event_type = event.get('type', 'unknown')
+                by_type[event_type] = by_type.get(event_type, 0) + 1
+                
+                # Count today
+                try:
+                    event_dt = datetime.fromisoformat(event['timestamp'].replace('Z', '+00:00'))
+                    if event_dt >= today_start:
+                        today_count += 1
+                    
+                    # Track latest time
+                    if latest_time is None or event_dt > latest_time:
+                        latest_time = event_dt
+                except:
+                    pass
+            
+            # Latest timestamp (raw string so frontend can render in local timezone)
+            latest_raw = None
+            if events:
+                # events are chronological; take last item
+                latest_raw = events[-1].get('timestamp')
+
+            statistics = {
+                'total': total,
+                'today': today_count,
+                'by_type': by_type,
+                'latest': latest_raw
+            }
+            
+            return jsonify({
+                'events': events,
+                'count': total,
+                'statistics': statistics
+            })
+        except Exception as e:
+            logger.error(f"[API] Motion events error: {e}")
+            return jsonify({'error': str(e), 'events': [], 'count': 0}), 500
     
     @app.route("/api/motion/delete/<event_id>", methods=["POST"])
     def api_delete_motion(event_id):
@@ -377,16 +526,41 @@ def create_lite_app(pi_model, camera_config):
     
     @app.route("/api/motion/clear", methods=["POST"])
     def api_clear_motion():
-        """Clear all motion events"""
+        """Clear all motion events and delete video files"""
         if 'user' not in session:
             return jsonify({'error': 'Not authenticated'}), 401
         
         try:
             events_path = os.path.join(BASE_DIR, "logs", "motion_events.json")
+            deleted_count = 0
+            freed_mb = 0
+            
+            # Delete all video files first
+            if os.path.exists(events_path):
+                with open(events_path, 'r') as f:
+                    events = json.load(f)
+                
+                for event in events:
+                    video_path = event.get('details', {}).get('video_path')
+                    if video_path:
+                        # video_path is just filename, need to add recordings folder
+                        full_path = os.path.join(BASE_DIR, "recordings", video_path)
+                        if os.path.exists(full_path):
+                            try:
+                                file_size = os.path.getsize(full_path) / (1024 * 1024)  # MB
+                                os.remove(full_path)
+                                deleted_count += 1
+                                freed_mb += file_size
+                                logger.debug(f"[MOTION] Deleted: {full_path}")
+                            except Exception as e:
+                                logger.error(f"[MOTION] Failed to delete {full_path}: {e}")
+            
+            # Clear events list
             with open(events_path, 'w') as f:
                 json.dump([], f)
-            logger.info("[MOTION] All events cleared")
-            return jsonify({'ok': True})
+            
+            logger.info(f"[MOTION] Cleared {deleted_count} events, freed {freed_mb:.2f}MB")
+            return jsonify({'ok': True, 'deleted': deleted_count, 'freed_mb': round(freed_mb, 2)})
         except Exception as e:
             logger.error(f"[MOTION] Clear failed: {e}")
             return jsonify({'ok': False, 'error': str(e)}), 500
@@ -411,6 +585,12 @@ def create_lite_app(pi_model, camera_config):
             cfg['motion_record_duration'] = int(data.get('motion_record_duration', 10))
             cfg['storage_cleanup_days'] = int(data.get('storage_cleanup_days', 7))
             cfg['nanny_cam_enabled'] = data.get('nanny_cam_enabled', False)
+
+            # WiFi settings
+            cfg['wifi_enabled'] = data.get('wifi_enabled', cfg.get('wifi_enabled', True))
+            cfg['wifi_ssid'] = data.get('wifi_ssid', cfg.get('wifi_ssid', ''))
+            cfg['wifi_password'] = data.get('wifi_password', cfg.get('wifi_password', ''))
+            cfg['wifi_country'] = data.get('wifi_country', cfg.get('wifi_country', 'US'))
             
             # SMS configuration
             cfg['sms_enabled'] = data.get('sms_enabled', False)
@@ -609,6 +789,9 @@ def create_lite_app(pi_model, camera_config):
         
         last_frame = None
         motion_cooldown = 0
+        frame_buffer = []  # Buffer to capture frames BEFORE motion detected
+        buffer_size = 8  # Keep last ~0.5 second (reduced for Pi Zero)
+        recording = False
         
         while True:
             try:
@@ -616,42 +799,115 @@ def create_lite_app(pi_model, camera_config):
                     break
                 
                 frame = camera.capture_array()
+                
+                # Motion detection - check every 2nd frame for performance
+                if len(frame_buffer) % 2 == 0:  # Skip every other frame for speed
+                    gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+                else:
+                    # Just buffer the frame and stream it
+                    frame_buffer.append(frame.copy())
+                    if len(frame_buffer) > buffer_size:
+                        frame_buffer.pop(0)
+                    
+                    img = Image.fromarray(frame)
+                    buf = io.BytesIO()
+                    img.save(buf, format='JPEG', quality=85)
+                    jpeg_bytes = buf.getvalue()
+                    yield (b'--frame\r\n'
+                           b'Content-Type: image/jpeg\r\n\r\n' + jpeg_bytes + b'\r\n')
+                    time.sleep(0.05)
+                    continue
+                
                 gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
                 
-                # Motion detection
+                # Always add current frame to buffer
+                frame_buffer.append(frame.copy())
+                if len(frame_buffer) > buffer_size:
+                    frame_buffer.pop(0)  # Remove oldest
+                
+                # Motion detection - check every frame for responsiveness
                 if motion_cooldown > 0:
                     motion_cooldown -= 1
                 else:
-                    if last_frame is not None:
+                    if last_frame is not None and not recording:
+                        # Advanced motion detection - filter out shadows and lighting
                         diff = cv2.absdiff(last_frame, gray)
-                        motion = np.mean(diff) > 5
+                        
+                        # Apply Gaussian blur to reduce noise and small changes
+                        blurred_diff = cv2.GaussianBlur(diff, (21, 21), 0)
+                        
+                        # Threshold to get significant changes only
+                        _, thresh = cv2.threshold(blurred_diff, 25, 255, cv2.THRESH_BINARY)
+                        
+                        # Calculate metrics
+                        mean_diff = np.mean(diff)
+                        max_diff = np.max(diff)
+                        motion_pixels = np.sum(thresh > 0)  # Count pixels with significant change
+                        total_pixels = thresh.shape[0] * thresh.shape[1]
+                        motion_percent = (motion_pixels / total_pixels) * 100
+                        
+                        # Detect edges to distinguish objects from shadows
+                        edges = cv2.Canny(gray, 50, 150)
+                        edge_motion = np.sum(edges > 0)
+                        
+                        # Motion = significant sharp changes with defined edges (person)
+                        # NOT just brightness changes (shadows/sunlight)
+                        # Require: high contrast change + substantial area + clear edges
+                        motion = (
+                            max_diff > 80 and           # Sharp contrast (person moving)
+                            motion_percent > 2.0 and    # At least 2% of frame changed
+                            edge_motion > 1000 and      # Has defined edges (not just shadows)
+                            mean_diff > 15              # Overall significant change
+                        )
                         
                         if motion:
                             cfg = get_config()
                             nanny_cam = cfg.get('nanny_cam_enabled', False)
 
                             if not nanny_cam and cfg.get('motion_record_enabled', True):
-                                logger.debug("[MOTION] Motion detected")
+                                logger.info(f"[MOTION] Motion detected (mean:{mean_diff:.1f}, max:{max_diff:.1f})")
+                                recording = True
                                 try:
-                                    # Save short clip (or snapshot fallback)
-                                    clip_file = save_motion_clip(camera, frame, duration_sec=3)
+                                    # Save clip using buffered frames + continue recording
+                                    clip_file = save_motion_clip_buffered(camera, frame_buffer.copy(), duration_sec=5)
                                     video_path = clip_file
                                     if not clip_file:
                                         # Fallback to snapshot if clip fails
                                         video_path = save_motion_snapshot(frame)
 
-                                    log_motion_event(
+                                    event = log_motion_event(
                                         event_type="motion",
                                         confidence=1.0,
                                         details={
                                             "mode": "lite",
-                                            "video_path": video_path
+                                            "video_path": video_path,
+                                            "mean_diff": float(mean_diff),  # Convert numpy to native Python
+                                            "max_diff": float(max_diff)     # Convert numpy to native Python
                                         }
                                     )
+                                    
+                                    # Send SMS notification if enabled
+                                    if cfg.get('sms_enabled') and cfg.get('send_motion_to_emergency'):
+                                        try:
+                                            from src.core import get_sms_notifier
+                                            sms_notifier = get_sms_notifier()
+                                            phone = cfg.get('sms_phone_to') or cfg.get('emergency_phone')
+                                            if phone:
+                                                device_name = cfg.get('device_name', 'ME Camera')
+                                                location = cfg.get('device_location', 'Unknown')
+                                                timestamp = datetime.now().strftime("%I:%M:%S %p")
+                                                msg = f"🚨 {device_name}: Motion detected at {location} - {timestamp}"
+                                                sms_notifier.send_sms(phone, msg)
+                                                logger.success(f"[SMS] Motion alert sent to {phone}")
+                                        except Exception as sms_error:
+                                            logger.error(f"[SMS] Notification failed: {sms_error}")
                                 except Exception as e:
-                                    logger.debug(f"[MOTION] Recording error: {e}")
+                                    logger.error(f"[MOTION] Recording error: {e}")
+                                finally:
+                                    recording = False
 
-                            motion_cooldown = 100
+                            # Cooldown: 45 frames (~3 sec) to avoid duplicate triggers
+                            motion_cooldown = 45
                 
                 last_frame = gray
                 

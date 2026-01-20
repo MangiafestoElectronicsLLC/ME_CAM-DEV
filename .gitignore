@@ -134,6 +134,20 @@ dmypy.json
 *.token
 *.secret
 
+# Deployment scripts (local only)
+deploy_*.ps1
+deploy_*.sh
+*_deployment_*.txt
+*_notes.txt
+pi_deployment_*.txt
+
+# Temporary documentation (consolidated in official docs)
+QUICK_*.txt
+QUICK_*.md
+*_SUMMARY.md
+*_IMPROVEMENTS.md
+*_GUIDE.md
+
 # OS junk
 .DS_Store
 Thumbs.db

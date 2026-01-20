@@ -279,6 +279,35 @@
 
             <div class="divider"></div>
 
+            <!-- WiFi Settings -->
+            <div class="form-section">
+                <div class="section-title">📶 WiFi</div>
+                <div class="form-group checkbox-group">
+                    <input type="checkbox" id="wifi_enabled" name="wifi_enabled" {% if config.get('wifi_enabled', True)
+                        %}checked{% endif %}>
+                    <label for="wifi_enabled" style="margin: 0; font-weight: 400;">Enable WiFi</label>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>WiFi SSID</label>
+                        <input type="text" name="wifi_ssid" value="{{ config.get('wifi_ssid', '') }}"
+                            placeholder="Network name">
+                    </div>
+                    <div class="form-group">
+                        <label>WiFi Password</label>
+                        <input type="password" name="wifi_password" value="{{ config.get('wifi_password', '') }}"
+                            placeholder="Network password">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Country Code</label>
+                    <input type="text" name="wifi_country" value="{{ config.get('wifi_country', 'US') }}"
+                        placeholder="US">
+                    <div class="help-text">Two-letter code (US, CA, GB, AU, etc.)</div>
+                </div>
+                <div class="info-box">Save to store WiFi credentials. Applying to system WiFi requires a reboot.</div>
+            </div>
+
             <!-- Emergency Settings -->
             <div class="form-section">
                 <div class="section-title">🚨 Emergency Alerts</div>
@@ -368,6 +397,10 @@
 
             <div class="divider"></div>
 
+            <!-- WiFi Settings (already added above, this is just positioning) -->
+
+            <div class="divider"></div>
+
             <!-- Save Button -->
             <button type="submit">💾 Save Configuration</button>
         </form>
@@ -385,7 +418,11 @@
                 motion_threshold: parseFloat(document.querySelector('input[name="motion_threshold"]').value),
                 motion_record_enabled: document.getElementById('motion_record').checked,
                 motion_record_duration: parseInt(document.querySelector('input[name="motion_record_duration"]').value),
-                storage_cleanup_days: parseInt(document.querySelector('input[name="storage_cleanup_days"]').value)
+                storage_cleanup_days: parseInt(document.querySelector('input[name="storage_cleanup_days"]').value),
+                wifi_enabled: document.getElementById('wifi_enabled').checked,
+                wifi_ssid: document.querySelector('input[name="wifi_ssid"]').value,
+                wifi_password: document.querySelector('input[name="wifi_password"]').value,
+                wifi_country: document.querySelector('input[name="wifi_country"]').value
             };
 
             try {

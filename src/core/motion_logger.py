@@ -56,7 +56,12 @@ def log_motion_event(event_type="motion", confidence=0.0, details=None):
                 events = events[-1000:]
             
             # Generate unique ID from timestamp
-            event_id = f"evt_{int(datetime.now().timestamp() * 1000)}"
+            # Use EST timezone (America/New_York)
+            from datetime import timezone, timedelta
+            est = timezone(timedelta(hours=-5))  # EST is UTC-5
+            now_est = datetime.now(est)
+            
+            event_id = f"evt_{int(now_est.timestamp() * 1000)}"
 
             video_path = None
             if details and details.get('video_path'):
@@ -64,8 +69,8 @@ def log_motion_event(event_type="motion", confidence=0.0, details=None):
 
             event = {
                 "id": event_id,
-                "timestamp": datetime.now().isoformat(),
-                "unix_timestamp": datetime.now().timestamp(),
+                "timestamp": now_est.isoformat(),
+                "unix_timestamp": now_est.timestamp(),
                 "type": event_type,
                 "confidence": round(confidence, 3),
                 "details": details or {},

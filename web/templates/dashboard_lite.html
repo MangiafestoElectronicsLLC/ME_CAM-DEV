@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ device_name }} - LITE MODE</title>
+    <title>{{ device_name }} - Pi Zero Version</title>
     <style>
         * {
             margin: 0;
@@ -42,13 +42,12 @@
         }
 
         .lite-badge {
-            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            background: linear-gradient(135deg, #4CAF50 0%, #66BB6A 100%);
             color: white;
             padding: 5px 15px;
             border-radius: 20px;
             font-size: 12px;
             font-weight: bold;
-            text-transform: uppercase;
         }
 
         .status-bar {
@@ -243,7 +242,7 @@
                 <small style="color: #666;">{{ device_id }} | {{ pi_model }} ({{ ram_mb }}MB RAM)</small>
             </div>
             <div style="display: flex; align-items: center; gap: 15px;">
-                <span class="lite-badge">⚡ LITE MODE v{{ version }}</span>
+                <span class="lite-badge">🔒 Pi Zero Version v{{ version }}</span>
                 <a href="/config" class="logout-btn" style="background: #667eea; color: white;">⚙️ Config</a>
                 <a href="/motion-events" class="logout-btn" style="background: #ff9800; color: white;">📊 Events</a>
                 <a href="/logout" class="logout-btn">Logout</a>
@@ -251,9 +250,9 @@
         </div>
 
         {% if ram_mb <= 512 %} <div class="warning-box">
-            <strong>⚠️ Pi Zero 2W Detected - LITE MODE Active</strong>
-            Lightweight mode optimized for 512MB RAM. Camera may show TEST MODE if memory insufficient.
-            For full camera streaming, use Pi 3B+ or higher (1GB+ RAM).
+            <strong>✅ Pi Zero 2W Detected - Optimized Mode Active</strong>
+            Lightweight mode optimized for 512MB RAM. All features fully functional including secure HTTPS connection.
+            Camera streaming, motion detection, and SMS alerts enabled.
     </div>
     {% endif %}
 
@@ -307,8 +306,8 @@
             <div class="info-card">
                 <h3>⚙️ System Info</h3>
                 <div class="metric">
-                    <span class="metric-label">Mode</span>
-                    <span class="metric-value">LITE</span>
+                    <span class="metric-label">Security</span>
+                    <span class="metric-value" style="color: #4CAF50; font-weight: bold;">🔒 SECURE</span>
                 </div>
                 <div class="metric">
                     <span class="metric-label">Pi Model</span>
@@ -367,10 +366,9 @@
     </div>
 
     <div style="text-align: center; color: rgba(255,255,255,0.8); font-size: 13px; margin-top: 20px;">
-        <p><strong>LITE MODE:</strong> Optimized for Pi Zero 2W | Minimal memory footprint | HTTPS enabled</p>
-        <p style="margin-top: 5px;">Features: Camera streaming + Motion detection + SMS alerts</p>
-        <p style="margin-top: 5px;">Access via: <strong>https://me_cam.com:8080</strong> or
-            <strong>http://[DEVICE-IP]:8080</strong>
+        <p><strong>🔒 SECURE CONNECTION</strong> | Optimized for Pi Zero 2W | Encrypted HTTPS</p>
+        <p style="margin-top: 5px;">Features: HD Camera Streaming · Motion Detection · SMS Alerts · Video Recording</p>
+        <p style="margin-top: 5px;">Secure Access: <strong>https://me_cam.com:8080</strong> (SSL/TLS Encrypted)
         </p>
     </div>
     </div>

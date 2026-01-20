@@ -24,6 +24,43 @@
             margin: 0 auto;
         }
 
+        @media (max-width: 768px) {
+            body {
+                padding: 12px;
+            }
+
+            .container {
+                max-width: 100%;
+            }
+
+            .header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 12px;
+            }
+
+            .header-buttons {
+                width: 100%;
+                justify-content: space-between;
+            }
+
+            .event-item {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 12px;
+            }
+
+            .event-actions {
+                width: 100%;
+                flex-wrap: wrap;
+            }
+
+            .event-actions button {
+                flex: 1 1 48%;
+                min-width: 140px;
+            }
+        }
+
         .header {
             background: white;
             border-radius: 15px;
@@ -158,6 +195,12 @@
             grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
             gap: 15px;
             margin-bottom: 20px;
+        }
+
+        @media (max-width: 768px) {
+            .stats {
+                grid-template-columns: 1fr;
+            }
         }
 
         .stat-card {
@@ -330,18 +373,19 @@
                 .then(r => r.json())
                 .then(data => {
                     const events = data.events || [];
-                    document.getElementById('total-count').textContent = events.length;
+                    const statistics = data.statistics || {};
 
-                    // Count today
-                    const today = new Date().toISOString().split('T')[0];
-                    const todayCount = events.filter(e => e.timestamp.startsWith(today)).length;
-                    document.getElementById('today-count').textContent = todayCount;
+                    // Use statistics from server
+                    document.getElementById('total-count').textContent = statistics.total || 0;
+                    document.getElementById('today-count').textContent = statistics.today || 0;
 
-                    // Latest event
-                    if (events.length > 0) {
-                        const latest = events[events.length - 1];
-                        const time = new Date(latest.timestamp).toLocaleTimeString('en-US', { hour12: true });
-                        document.getElementById('latest-time').textContent = time;
+                    // Latest event time -> convert to browser local time for accuracy
+                    if (statistics.latest) {
+                        const date = new Date(statistics.latest);
+                        const timeStr = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+                        document.getElementById('latest-time').textContent = timeStr;
+                    } else {
+                        document.getElementById('latest-time').textContent = '-';
                     }
 
                     renderEvents(events);
@@ -349,11 +393,9 @@
         }
 
         function formatTimestamp(timestamp) {
-            // Parse the timestamp and convert to local timezone
-            // Brockport, NY is Eastern Time (UTC-5 EST or UTC-4 EDT)
-            const date = new Date(timestamp + 'Z'); // Add Z to force UTC parsing
+            // Parse the timestamp and convert to browser's local timezone
+            const date = new Date(timestamp);
             return date.toLocaleString('en-US', {
-                timeZone: 'America/New_York',
                 year: 'numeric',
                 month: '2-digit',
                 day: '2-digit',
@@ -381,8 +423,10 @@
                 const formattedTime = formatTimestamp(event.timestamp);
                 const videoPath = event.details?.video_path || null;
                 const isVideo = videoPath && (videoPath.endsWith('.mp4') || videoPath.endsWith('.h264'));
-                const videoButton = videoPath ?
-                    `<button class="btn-delete" style="background: #2196F3;" onclick="viewMedia('/recordings/${videoPath}', ${isVideo})">📹 ${isVideo ? 'Video' : 'Image'}</button>` :
+                // Ensure proper path - add /recordings/ if not present
+                const fullPath = videoPath ? (videoPath.startsWith('/recordings/') ? videoPath : `/recordings/${videoPath}`) : null;
+                const videoButton = fullPath ?
+                    `<button class="btn-delete" style="background: #2196F3;" onclick="viewMedia('${fullPath}', ${isVideo})">📹 ${isVideo ? 'Video' : 'Image'}</button>` :
                     '';
 
                 return `
@@ -495,15 +539,23 @@
         }
 
         function clearAllEvents() {
-            if (!confirm('Clear ALL motion events? This cannot be undone.')) return;
+            if (!confirm('Clear ALL motion events? This will delete all video files. Cannot be undone.')) return;
 
             fetch('/api/motion/clear', { method: 'POST' })
                 .then(r => r.json())
                 .then(data => {
                     if (data.ok) {
-                        showNotification('All events cleared', 'success');
-                        loadEvents();
+                        const msg = data.deleted ?
+                            `✅ Cleared ${data.deleted} events, freed ${data.freed_mb}MB` :
+                            '✅ All events cleared';
+                        showNotification(msg, 'success');
+                        setTimeout(() => location.reload(), 2000);
+                    } else {
+                        showNotification('❌ Failed to clear events', 'error');
                     }
+                })
+                .catch(err => {
+                    showNotification('❌ Error: ' + err.message, 'error');
                 });
         }
 
