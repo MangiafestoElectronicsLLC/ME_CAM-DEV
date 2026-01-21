@@ -1,38 +1,58 @@
-# ME_CAM Installation Guide
+# ME_CAM Installation Guide (Updated Jan 2026)
+
+## ⚠️ IMPORTANT - READ FIRST
+**DO NOT use Bullseye** — repos are archived and broken. Use **Bookworm (Latest OS)**.
 
 ## Prerequisites
-- Raspberry Pi Zero 2W with imx708 camera module
-- Fresh Raspberry Pi OS Lite (Bullseye) SD card
+- **Raspberry Pi Zero 2W** (or Pi 4/5) with imx708 camera
+- **Raspberry Pi OS Lite (Bookworm 64-bit)** — Latest version
 - Network connectivity (WiFi or Ethernet)
+- Minimum 4GB SD card
 
-## Quick Installation
+---
 
-### 1. Flash Raspberry Pi OS
-```bash
-# Use Raspberry Pi Imager to flash Raspberry Pi OS Lite (32-bit)
-# Enable SSH in advanced settings
-# Set hostname: raspberrypi
-# Configure WiFi if needed
-```
+## 5-Minute Quick Install
+
+### 1. Flash SD Card with Raspberry Pi Imager
+
+**Critical steps:**
+1. Open **Raspberry Pi Imager**
+2. **Choose OS:** Raspberry Pi OS Lite (64-bit) — **Latest (Bookworm)**
+3. Click **gear icon** (Advanced Options):
+   - ✅ Enable SSH → Use password auth
+   - Set hostname: `mecamera` (or your device name)
+   - Set username: `pi`
+   - Set password: `raspberry` (change later)
+   - Configure WiFi if needed
+4. Select SD card → **Flash**
 
 ### 2. SSH into Pi
 ```bash
-ssh pi@raspberrypi.local
-# Default password: raspberry (change this!)
+ssh pi@mecamera.local
+# Password: raspberry
 ```
 
-### 3. Update System
+### 3. Update & Install System Dependencies
 ```bash
 sudo apt update && sudo apt upgrade -y
+sudo apt install -y git python3-dev build-essential python3-numpy python3-pil
 ```
 
-### 4. Install Dependencies
+### 4. Clone & Install ME_CAM
 ```bash
-# System packages
-sudo apt install -y git python3-pip libcamera-apps
+cd ~
+git clone https://github.com/MangiafestoElectronicsLLC/ME_CAM-DEV.git
+cd ME_CAM-DEV
+python3 -m venv --system-site-packages venv
+source venv/bin/activate
+pip install --upgrade setuptools wheel
+pip install Flask==3.0.0 Werkzeug==3.0.0 cryptography==41.0.0 qrcode[pil]==7.4.2 \
+  psutil==5.9.5 yagmail==0.15.293 pydrive2==1.19.0 loguru==0.7.2
+```
 
-# Python packages (skip python3-opencv - not needed)
-pip3 install flask loguru cryptography werkzeug qrcode[pil]
+### 5. Verify Installation
+```bash
+python -c "import numpy, flask, PIL, cryptography, loguru; print('✓ All imports OK')"
 ```
 
 ### 5. Configure Camera & GPU Memory for Pi Zero 2W

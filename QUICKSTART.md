@@ -1,37 +1,52 @@
-# ME CAMERA v2.1 - QUICK START GUIDE
+# ME CAMERA v2.1 - QUICK START GUIDE (Updated Jan 2026)
 
-## 60-Second Setup
+## ⚠️ OS REQUIREMENT
+**Use Raspberry Pi OS Lite (Bookworm 64-bit) — Latest version**
+**DO NOT use Bullseye** — repos are archived
+
+---
+
+## 5-Minute Setup
 
 ```bash
-# 1. Flash SD card with Bullseye OS (use Raspberry Pi Imager)
+# 1. Flash SD card with Bookworm OS (use Raspberry Pi Imager)
+#    - Select: Raspberry Pi OS Lite (64-bit)
+#    - Enable SSH in advanced settings
+#    - Set hostname: mecamera
+
 # 2. SSH into Pi
 ssh pi@mecamera.local
 
-# 3. Update system and disable legacy camera (REQUIRED!)
+# 3. Update & install system packages
 sudo apt update && sudo apt upgrade -y
-sudo raspi-config  # → Interfacing → Camera → NO, I2C → YES → Reboot
+sudo apt install -y git python3-dev build-essential python3-numpy python3-pil
 
 # 4. Clone and setup
 cd ~
 git clone https://github.com/MangiafestoElectronicsLLC/ME_CAM-DEV.git
 cd ME_CAM-DEV
-python3 -m venv venv
+python3 -m venv --system-site-packages venv
 source venv/bin/activate
-pip install -r requirements.txt
+pip install --upgrade setuptools wheel
+pip install Flask==3.0.0 Werkzeug==3.0.0 cryptography==41.0.0 \
+  qrcode[pil]==7.4.2 psutil==5.9.5 yagmail==0.15.293 \
+  pydrive2==1.19.0 loguru==0.7.2
 
-# 5. Configure
-cp config/config_default.json config/config.json
-nano config/config.json  # Edit device name if desired
+# 5. Verify installation
+python -c "import numpy, flask, PIL, cryptography, loguru; print('✓ OK')"
 
-# 6. Install service and start
-sudo cp etc/systemd/system/mecamera.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable mecamera
-sudo systemctl start mecamera
+# 6. Configure camera
+sudo raspi-config  # → Interfacing → Camera → YES, I2C → YES → Reboot
+sudo reboot
 
-# 7. Access dashboard
+# 7. Start service
+ssh pi@mecamera.local
+cd ~/ME_CAM-DEV
+source venv/bin/activate
+python main.py
+
+# 8. Access dashboard
 # Open: http://mecamera.local:8080
-# Login: admin / admin123
 ```
 
 **Done! Dashboard should show ● ONLINE status**
@@ -43,16 +58,23 @@ sudo systemctl start mecamera
 ✅ System installed and running  
 ✅ Web dashboard accessible  
 ✅ API endpoints operational  
-✅ Service enabled for auto-boot  
-✅ Battery monitoring available  
-✅ Motion detection ready  
-✅ Multi-device support configured  
+✅ Camera configured
+✅ Python 3.13 compatible packages installed
+✅ System packages (numpy, Pillow) used for speed
 
 ---
 
 ## Common Tasks
 
-### Check Service Status
+### Check if Running
+```bash
+# If using python main.py directly:
+ps aux | grep main.py
+
+# To stop: Press Ctrl+C in the terminal
+```
+
+### Check Service Status (if systemd service installed)
 ```bash
 sudo systemctl status mecamera
 # Should show: Active (running)
