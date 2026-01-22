@@ -367,6 +367,16 @@ def create_lite_app(pi_model, camera_config):
             cfg = get_config()
             cfg['device_name'] = request.form.get('device_name', 'ME Camera')
             cfg['device_id'] = request.form.get('device_id', 'camera-001')
+            cfg['device_location'] = request.form.get('device_location', '')
+            cfg['emergency_phone'] = request.form.get('emergency_phone', '')
+            cfg['send_motion_to_emergency'] = request.form.get('send_motion_to_emergency', False) == 'on'
+            cfg['motion_threshold'] = float(request.form.get('motion_threshold', 0.5))
+            cfg['motion_record_enabled'] = request.form.get('motion_record_enabled', True) == 'on'
+            cfg['motion_record_duration'] = int(request.form.get('motion_record_duration', 10))
+            cfg['storage_cleanup_days'] = int(request.form.get('retention_days', 7))
+            cfg['sms_enabled'] = request.form.get('sms_enabled', False) == 'on'
+            cfg['sms_phone_to'] = request.form.get('sms_phone_to', '')
+            cfg['sms_api_key'] = request.form.get('sms_api_key', '')
             save_config(cfg)
             
             from src.core import create_user
@@ -375,7 +385,26 @@ def create_lite_app(pi_model, camera_config):
             mark_first_run_complete()
             return redirect(url_for('login'))
         
-        return render_template('first_run.html', pi_model=pi_model)
+        # Get current config for display
+        cfg = get_config()
+        config_display = {
+            'storage': {
+                'retention_days': cfg.get('storage_cleanup_days', 7),
+                'motion_only': cfg.get('motion_record_enabled', True)
+            },
+            'device_name': cfg.get('device_name', 'ME Camera'),
+            'device_id': cfg.get('device_id', 'camera-001'),
+            'device_location': cfg.get('device_location', ''),
+            'emergency_phone': cfg.get('emergency_phone', ''),
+            'send_motion_to_emergency': cfg.get('send_motion_to_emergency', False),
+            'motion_threshold': cfg.get('motion_threshold', 0.5),
+            'motion_record_enabled': cfg.get('motion_record_enabled', True),
+            'motion_record_duration': cfg.get('motion_record_duration', 10),
+            'sms_enabled': cfg.get('sms_enabled', False),
+            'sms_phone_to': cfg.get('sms_phone_to', ''),
+        }
+        
+        return render_template('first_run.html', pi_model=pi_model, config=config_display)
     
     @app.route("/config", methods=["GET", "POST"])
     def config_page():
