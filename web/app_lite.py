@@ -368,15 +368,21 @@ def create_lite_app(pi_model, camera_config):
             cfg['device_name'] = request.form.get('device_name', 'ME Camera')
             cfg['device_id'] = request.form.get('device_id', 'camera-001')
             cfg['device_location'] = request.form.get('device_location', '')
+            cfg['pin_enabled'] = request.form.get('pin_enabled', False) == 'on'
+            cfg['pin_code'] = request.form.get('pin_code', '')
+            cfg['storage_cleanup_days'] = int(request.form.get('retention_days', 7))
+            cfg['motion_record_enabled'] = request.form.get('motion_only', True) == 'on'
+            cfg['storage_encrypt'] = request.form.get('encrypt', False) == 'on'
+            cfg['detection_person_only'] = request.form.get('person_only', False) == 'on'
+            cfg['detection_sensitivity'] = float(request.form.get('sensitivity', 0.5))
             cfg['emergency_phone'] = request.form.get('emergency_phone', '')
             cfg['send_motion_to_emergency'] = request.form.get('send_motion_to_emergency', False) == 'on'
-            cfg['motion_threshold'] = float(request.form.get('motion_threshold', 0.5))
-            cfg['motion_record_enabled'] = request.form.get('motion_record_enabled', True) == 'on'
-            cfg['motion_record_duration'] = int(request.form.get('motion_record_duration', 10))
-            cfg['storage_cleanup_days'] = int(request.form.get('retention_days', 7))
-            cfg['sms_enabled'] = request.form.get('sms_enabled', False) == 'on'
-            cfg['sms_phone_to'] = request.form.get('sms_phone_to', '')
-            cfg['sms_api_key'] = request.form.get('sms_api_key', '')
+            cfg['email_enabled'] = request.form.get('email_enabled', False) == 'on'
+            cfg['email_address'] = request.form.get('email_address', '')
+            cfg['gdrive_enabled'] = request.form.get('gdrive_enabled', False) == 'on'
+            cfg['gdrive_folder_id'] = request.form.get('gdrive_folder_id', '')
+            cfg['wifi_enabled'] = request.form.get('wifi_enabled', True) == 'on'
+            cfg['bluetooth_enabled'] = request.form.get('bluetooth_enabled', False) == 'on'
             save_config(cfg)
             
             from src.core import create_user
@@ -388,15 +394,33 @@ def create_lite_app(pi_model, camera_config):
         # Get current config for display
         cfg = get_config()
         config_display = {
-            'storage': {
-                'retention_days': cfg.get('storage_cleanup_days', 7),
-                'motion_only': cfg.get('motion_record_enabled', True)
-            },
             'device_name': cfg.get('device_name', 'ME Camera'),
             'device_id': cfg.get('device_id', 'camera-001'),
             'device_location': cfg.get('device_location', ''),
+            'pin_enabled': cfg.get('pin_enabled', False),
+            'pin_code': cfg.get('pin_code', ''),
+            'storage': {
+                'retention_days': cfg.get('storage_cleanup_days', 7),
+                'motion_only': cfg.get('motion_record_enabled', True),
+                'encrypt': cfg.get('storage_encrypt', False),
+                'encrypted_dir': cfg.get('storage_encrypted_dir', '/mnt/encrypted')
+            },
+            'detection': {
+                'person_only': cfg.get('detection_person_only', False),
+                'sensitivity': cfg.get('detection_sensitivity', 0.5)
+            },
             'emergency_phone': cfg.get('emergency_phone', ''),
             'send_motion_to_emergency': cfg.get('send_motion_to_emergency', False),
+            'email': {
+                'enabled': cfg.get('email_enabled', False)
+            },
+            'email_address': cfg.get('email_address', ''),
+            'google_drive': {
+                'enabled': cfg.get('gdrive_enabled', False),
+                'folder_id': cfg.get('gdrive_folder_id', '')
+            },
+            'wifi_enabled': cfg.get('wifi_enabled', True),
+            'bluetooth_enabled': cfg.get('bluetooth_enabled', False),
             'motion_threshold': cfg.get('motion_threshold', 0.5),
             'motion_record_enabled': cfg.get('motion_record_enabled', True),
             'motion_record_duration': cfg.get('motion_record_duration', 10),
