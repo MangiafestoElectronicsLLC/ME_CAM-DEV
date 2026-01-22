@@ -1,4 +1,16 @@
 # Pi Zero 2W Complete Setup Guide (Flash to Auto-Boot)
+## Updated: January 22, 2026
+
+**What This Guide Covers:**
+- Flash SD card with Raspberry Pi OS (64-bit)
+- SSH setup and WiFi configuration
+- Install ME_CAM with all dependencies
+- Configure first-run setup via web interface
+- Enable auto-boot on startup
+
+**Time Required:** 30-45 minutes (including downloads)
+
+---
 
 ## STEP 1: Flash SD Card with Raspberry Pi Imager
 
@@ -89,10 +101,11 @@ Password: `raspberry` (or what you set)
 **Copy/paste this entire block:**
 
 ```bash
-# Update system
+# Update system (may take 5-10 minutes)
 sudo apt update && sudo apt upgrade -y
 
 # Install system dependencies (includes picamera2)
+# This takes 5-10 minutes on Pi Zero 2W
 sudo apt install -y git python3-dev build-essential \
   python3-numpy python3-pil python3-opencv \
   python3-picamera2 libcamera-apps
@@ -102,11 +115,12 @@ cd ~
 git clone https://github.com/MangiafestoElectronicsLLC/ME_CAM-DEV.git
 cd ME_CAM-DEV
 
-# Create venv with system packages access
+# Create venv with system packages access (IMPORTANT: --system-site-packages flag)
 python3 -m venv venv --system-site-packages
 source venv/bin/activate
 
 # Install Python packages (NOT numpy/opencv - using system versions)
+# This takes 3-5 minutes
 pip install Flask==3.0.0 Werkzeug==3.0.0 cryptography==41.0.0 \
   qrcode[pil]==7.4.2 psutil==5.9.5 yagmail==0.15.293 \
   pydrive2==1.19.0 loguru==0.7.2
@@ -119,7 +133,12 @@ echo "✓ Installation complete!"
 echo "Next: Test manually then setup auto-boot"
 ```
 
-This takes **10-15 minutes** on Pi Zero 2W.
+**Total Time:** 15-25 minutes on Pi Zero 2W (depending on internet speed)
+
+**Important Notes:**
+- The `--system-site-packages` flag is REQUIRED for numpy/opencv
+- Don't install numpy/opencv via pip on Pi Zero - it will take 30+ minutes and may fail
+- If you see pip warnings about pyOpenSSL versions, that's normal
 
 ---
 
@@ -140,14 +159,26 @@ python main_lite.py
 - ✅ `[PI_DETECT] RAM: 512MB`
 - ✅ `[PI_DETECT] Camera mode: lite`
 - ✅ `Running on http://10.2.1.X:8080`
+- ⚠️  Camera init warning is OK - will work after first setup
 
-**Test in browser:** `http://10.2.1.X:8080`
+**Test in browser:** `http://mecamdev3.local:8080` or `http://10.2.1.X:8080`
 
-- Should show **"LITE MODE V2.1-LITE"** badge
-- Camera feed should work
-- Dashboard should load
+**First-Time Setup:**
+1. Browser redirects to `/setup` page automatically
+2. Fill in device configuration:
+   - Device Name: e.g., "Front Door Camera"
+   - Retention Days: 7 (default)
+   - Other settings are optional
+3. Click "Save & Continue to Dashboard"
+4. Login with `admin` / `admin123`
+5. Dashboard should load with live camera feed
 
 **Press Ctrl+C** to stop after verifying.
+
+**Common Issues:**
+- Camera shows "list index out of range" - This is normal on first run, will work after setup
+- Port 8080 in use - Run `pkill -f main_lite.py` to kill old process
+- 404 error on save - Make sure you pulled latest code from GitHub
 
 ---
 
