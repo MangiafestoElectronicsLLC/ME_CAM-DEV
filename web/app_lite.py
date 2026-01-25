@@ -49,19 +49,36 @@ def create_lite_app(pi_model, camera_config):
     # Nanny cam mode (when enabled, motion is not logged/recorded)
     nanny_cam_enabled = False
     
-    # Initialize camera
+    # Initialize camera - try RpicamStreamer first (most compatible)
     camera = None
+    camera_available = False
+    
     if camera_config['mode'] in ['lite', 'fast']:
         try:
-            from picamera2 import Picamera2
-            camera = Picamera2()
-            camera.configure(camera.create_preview_configuration(
-                main={"size": (640, 480), "format": "RGB888"}
-            ))
-            camera.start()
-            logger.success(f"[CAMERA] Camera initialized: 640x480")
+            from src.camera import RpicamStreamer, is_rpicam_available
+            
+            if is_rpicam_available():
+                logger.info("[CAMERA] Attempting rpicam-jpeg streaming...")
+                camera = RpicamStreamer(width=640, height=480, fps=15)
+                if camera.start():
+                    camera_available = True
+                    logger.success(f"[CAMERA] RPiCam initialized: 640x480 @ 15 FPS")
+            else:
+                logger.warning("[CAMERA] rpicam-jpeg not available, falling back to picamera2...")
+                from picamera2 import Picamera2
+                camera = Picamera2()
+                camera.configure(camera.create_preview_configuration(
+                    main={"size": (640, 480), "format": "RGB888"}
+                ))
+                camera.start()
+                camera_available = True
+                logger.success(f"[CAMERA] Camera initialized (picamera2): 640x480")
+        except ImportError as e:
+            logger.warning(f"[CAMERA] Required module not available: {e}")
         except Exception as e:
             logger.warning(f"[CAMERA] Camera init failed: {e}")
+            camera = None
+            camera_available = False
     
     # ============= HELPER FUNCTIONS =============
     
@@ -482,7 +499,7 @@ def create_lite_app(pi_model, camera_config):
         if 'user' not in session:
             return redirect(url_for('login'))
         
-        if camera is None:
+        if camera is None or not camera_available:
             return Response(generate_test_pattern(), mimetype='multipart/x-mixed-replace; boundary=frame')
         
         return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
@@ -851,6 +868,19 @@ def create_lite_app(pi_model, camera_config):
                 if camera is None:
                     break
                 
+                # Check if using RpicamStreamer or picamera2
+                if hasattr(camera, 'get_jpeg_frame'):
+                    # RpicamStreamer - get JPEG directly
+                    jpeg_bytes = camera.get_jpeg_frame()
+                    if not jpeg_bytes:
+                        time.sleep(0.1)
+                        continue
+                    yield (b'--frame\r\n'
+                           b'Content-Type: image/jpeg\r\n\r\n' + jpeg_bytes + b'\r\n')
+                    time.sleep(0.05)
+                    continue
+                
+                # picamera2 - get array and convert
                 frame = camera.capture_array()
                 
                 # Motion detection - check every 2nd frame for performance
