@@ -1503,16 +1503,6 @@ network={{
                            b'Content-Type: image/jpeg\r\n\r\n' + jpeg_bytes + b'\r\n')
                     time.sleep(0.05)
                     continue
-                        except Exception as e:
-                            logger.debug(f"[MOTION] Detection error: {e}")
-                    
-                    if motion_cooldown > 0:
-                        motion_cooldown -= 1
-                    
-                    yield (b'--frame\r\n'
-                           b'Content-Type: image/jpeg\r\n\r\n' + jpeg_bytes + b'\r\n')
-                    time.sleep(0.05)
-                    continue
                 
                 # picamera2 - get array and convert
                 frame = camera.capture_array()
