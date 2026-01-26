@@ -9,7 +9,7 @@ Lightweight Flask App for Pi Zero 2W - COMPLETE VERSION
 - Battery monitoring
 """
 
-from flask import Flask, render_template, request, redirect, url_for, session, jsonify, Response
+from flask import Flask, render_template, request, redirect, url_for, session, jsonify, Response, send_file
 from loguru import logger
 import os
 import sys
@@ -1016,10 +1016,11 @@ network={{
                     events = json.load(f)
                 
                 for event in events:
-                    video_path = event.get('details', {}).get('video_path')
-                    if video_path:
+                    # Check both old and new video_path locations
+                    video_filename = event.get('video_path') or event.get('details', {}).get('video_path')
+                    if video_filename:
                         # video_path is just filename, need to add recordings folder
-                        full_path = os.path.join(BASE_DIR, "recordings", video_path)
+                        full_path = os.path.join(BASE_DIR, "recordings", video_filename)
                         if os.path.exists(full_path):
                             try:
                                 file_size = os.path.getsize(full_path) / (1024 * 1024)  # MB
@@ -1038,6 +1039,93 @@ network={{
             return jsonify({'ok': True, 'deleted': deleted_count, 'freed_mb': round(freed_mb, 2)})
         except Exception as e:
             logger.error(f"[MOTION] Clear failed: {e}")
+            return jsonify({'ok': False, 'error': str(e)}), 500
+    
+    @app.route("/api/motion/video/<video_filename>", methods=["GET"])
+    def api_get_video(video_filename):
+        """Stream or download motion event video"""
+        if 'user' not in session:
+            return jsonify({'error': 'Not authenticated'}), 401
+        
+        try:
+            # Prevent directory traversal
+            if '/' in video_filename or '\\' in video_filename or '..' in video_filename:
+                return jsonify({'error': 'Invalid filename'}), 400
+            
+            video_path = os.path.join(BASE_DIR, "recordings", video_filename)
+            
+            # Verify file exists and is an mp4
+            if not os.path.exists(video_path) or not video_filename.endswith('.mp4'):
+                return jsonify({'error': 'Video not found'}), 404
+            
+            # Stream the video
+            return send_file(video_path, mimetype='video/mp4', as_attachment=False)
+        except Exception as e:
+            logger.error(f"[VIDEO] Stream error: {e}")
+            return jsonify({'error': str(e)}), 500
+    
+    @app.route("/api/motion/video/<video_filename>/download", methods=["GET"])
+    def api_download_video(video_filename):
+        """Download motion event video"""
+        if 'user' not in session:
+            return jsonify({'error': 'Not authenticated'}), 401
+        
+        try:
+            # Prevent directory traversal
+            if '/' in video_filename or '\\' in video_filename or '..' in video_filename:
+                return jsonify({'error': 'Invalid filename'}), 400
+            
+            video_path = os.path.join(BASE_DIR, "recordings", video_filename)
+            
+            # Verify file exists and is an mp4
+            if not os.path.exists(video_path) or not video_filename.endswith('.mp4'):
+                return jsonify({'error': 'Video not found'}), 404
+            
+            # Download the video
+            return send_file(video_path, mimetype='video/mp4', as_attachment=True, download_name=video_filename)
+        except Exception as e:
+            logger.error(f"[VIDEO] Download error: {e}")
+            return jsonify({'error': str(e)}), 500
+    
+    @app.route("/api/motion/video/<video_filename>", methods=["DELETE"])
+    def api_delete_video(video_filename):
+        """Delete motion event video"""
+        if 'user' not in session:
+            return jsonify({'error': 'Not authenticated'}), 401
+        
+        try:
+            # Prevent directory traversal
+            if '/' in video_filename or '\\' in video_filename or '..' in video_filename:
+                return jsonify({'error': 'Invalid filename'}), 400
+            
+            video_path = os.path.join(BASE_DIR, "recordings", video_filename)
+            
+            # Verify file exists
+            if not os.path.exists(video_path):
+                return jsonify({'error': 'Video not found'}), 404
+            
+            # Delete the video file
+            file_size_mb = os.path.getsize(video_path) / (1024 * 1024)
+            os.remove(video_path)
+            
+            # Update motion events to mark video as deleted
+            events_path = os.path.join(BASE_DIR, "logs", "motion_events.json")
+            if os.path.exists(events_path):
+                with open(events_path, 'r') as f:
+                    events = json.load(f)
+                
+                for event in events:
+                    if event.get('video_path') == video_filename:
+                        event['has_video'] = False
+                        event['video_path'] = None
+                
+                with open(events_path, 'w') as f:
+                    json.dump(events, f, indent=2)
+            
+            logger.info(f"[VIDEO] Deleted: {video_filename} ({file_size_mb:.1f}MB)")
+            return jsonify({'ok': True, 'freed_mb': round(file_size_mb, 2)})
+        except Exception as e:
+            logger.error(f"[VIDEO] Delete error: {e}")
             return jsonify({'ok': False, 'error': str(e)}), 500
     
     @app.route("/api/config/update", methods=["POST"])
@@ -1256,24 +1344,86 @@ network={{
     # ============= FRAME GENERATORS =============
     
     def generate_frames():
-        """Generate camera frames"""
+        """Generate camera frames with motion detection and video recording"""
         import cv2
         import numpy as np
         from PIL import Image
         import io
+        from collections import deque
+        from threading import Thread
         
         last_frame = None
         motion_cooldown = 0
-        frame_buffer = []  # Buffer to capture frames BEFORE motion detected
-        # BUG FIX #2: Reduce buffer size for Pi Zero 2W (512MB RAM)
-        # Each frame is ~600KB, so limit to 4 frames = 2.4MB instead of 8 frames = 4.8MB
-        buffer_size = 4 if pi_model.get('ram_mb', 1024) <= 512 else 8
+        # Circular buffer for pre-motion frames (2-3 seconds at 20 FPS = 40-60 frames)
+        frame_buffer = deque(maxlen=60)
+        buffer_size = 60 if pi_model.get('ram_mb', 1024) <= 512 else 120
+        frame_buffer = deque(maxlen=buffer_size)
+        
         recording = False
-        frame_count = 0  # BUG FIX #3: Add frame counter for consistent motion detection
+        frame_count = 0
+        recording_frames = []
+        recording_start = None
+        
+        def save_video_async(frames_list, event_id):
+            """Save video in background thread to avoid blocking stream"""
+            try:
+                if len(frames_list) < 10:
+                    logger.warning("[MOTION] Insufficient frames for video")
+                    return
+                
+                recordings_path = os.path.join(BASE_DIR, "recordings")
+                os.makedirs(recordings_path, exist_ok=True)
+                
+                # Get first frame dimensions
+                h, w = frames_list[0].shape[:2]
+                
+                # Create video file
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                video_filename = f"motion_{timestamp}.mp4"
+                video_path = os.path.join(recordings_path, video_filename)
+                
+                # Use H.264 codec for browser compatibility
+                fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # MP4 codec
+                fps = 20.0
+                out = cv2.VideoWriter(video_path, fourcc, fps, (w, h))
+                
+                if not out.isOpened():
+                    logger.error("[MOTION] Could not open video writer")
+                    return
+                
+                # Write all frames
+                for frame in frames_list:
+                    out.write(frame)
+                
+                out.release()
+                
+                file_size = os.path.getsize(video_path) / (1024 * 1024)
+                logger.success(f"[MOTION] Video saved: {video_filename} ({file_size:.1f}MB)")
+                
+                # Update motion event with video path
+                try:
+                    events_path = os.path.join(BASE_DIR, "logs", "motion_events.json")
+                    if os.path.exists(events_path):
+                        with open(events_path, 'r') as f:
+                            events = json.load(f)
+                        
+                        # Find the event by ID and update it
+                        for event in events:
+                            if event.get('id') == event_id:
+                                event['has_video'] = True
+                                event['video_path'] = video_filename
+                                break
+                        
+                        with open(events_path, 'w') as f:
+                            json.dump(events, f, indent=2)
+                except Exception as e:
+                    logger.error(f"[MOTION] Could not update event metadata: {e}")
+            
+            except Exception as e:
+                logger.error(f"[MOTION] Video save error: {e}")
         
         while True:
             try:
-                # Periodically retry queued notifications/offline clips without touching camera settings
                 maybe_flush_queues()
 
                 if camera is None:
@@ -1287,21 +1437,22 @@ network={{
                         time.sleep(0.1)
                         continue
                     
-                    # BUG FIX #3: Use frame counter instead of buffer length for consistency
                     frame_count += 1
                     
-                    # Motion detection for JPEG streams (decode -> detect -> encode)
-                    if motion_cooldown == 0 and frame_count % 2 == 0:
-                        try:
-                            # Decode JPEG to numpy array for motion detection
-                            nparr = np.frombuffer(jpeg_bytes, np.uint8)
-                            frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                    # Decode JPEG for motion detection and buffering
+                    try:
+                        nparr = np.frombuffer(jpeg_bytes, np.uint8)
+                        frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                        
+                        if frame is not None:
+                            # Add to frame buffer for pre-motion recording
+                            frame_buffer.append(frame.copy())
                             
-                            if frame is not None:
+                            # Motion detection (every 2nd frame for performance)
+                            if frame_count % 2 == 0:
                                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                                 
                                 if last_frame is not None:
-                                    # Calculate frame difference
                                     diff = cv2.absdiff(last_frame, gray)
                                     _, thresh = cv2.threshold(diff, 25, 255, cv2.THRESH_BINARY)
                                     motion_pixels = cv2.countNonZero(thresh)
@@ -1311,13 +1462,47 @@ network={{
                                     cfg = get_config()
                                     motion_threshold = cfg.get('motion_threshold', 0.02)
                                     
-                                    if motion_ratio > motion_threshold:
-                                        logger.info(f"[MOTION] Motion detected: {motion_ratio*100:.1f}% pixels changed")
-                                        # Log motion event
-                                        log_motion_event('motion', motion_ratio, {'threshold': motion_threshold})
-                                        motion_cooldown = 30  # 30 frame cooldown (~1.5 seconds)
+                                    # Motion detected and not in cooldown
+                                    if motion_ratio > motion_threshold and motion_cooldown == 0:
+                                        logger.info(f"[MOTION] Motion detected: {motion_ratio*100:.1f}% pixels")
+                                        
+                                        # Log motion event and get event_id
+                                        event_data = log_motion_event('motion', motion_ratio, {'threshold': motion_threshold})
+                                        event_id = event_data.get('id') if event_data else f"evt_{int(time.time()*1000)}"
+                                        
+                                        # Start recording
+                                        recording = True
+                                        recording_frames = list(frame_buffer)  # Pre-motion frames
+                                        recording_start = time.time()
+                                        motion_cooldown = 30
+                                        
+                                        logger.info(f"[MOTION] Recording started with {len(recording_frames)} pre-motion frames")
                                 
                                 last_frame = gray
+                    except Exception as e:
+                        logger.debug(f"[MOTION] Frame processing error: {e}")
+                    
+                    # Continue recording for 5 seconds after motion
+                    if recording:
+                        recording_frames.append(frame.copy())
+                        
+                        if time.time() - recording_start > 5:
+                            recording = False
+                            logger.info(f"[MOTION] Recording complete: {len(recording_frames)} total frames")
+                            
+                            # Save video in background thread
+                            video_thread = Thread(target=save_video_async, args=(recording_frames, event_id), daemon=True)
+                            video_thread.start()
+                            
+                            recording_frames = []
+                    
+                    if motion_cooldown > 0:
+                        motion_cooldown -= 1
+                    
+                    yield (b'--frame\r\n'
+                           b'Content-Type: image/jpeg\r\n\r\n' + jpeg_bytes + b'\r\n')
+                    time.sleep(0.05)
+                    continue
                         except Exception as e:
                             logger.debug(f"[MOTION] Detection error: {e}")
                     
