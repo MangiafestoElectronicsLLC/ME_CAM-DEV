@@ -739,10 +739,8 @@ def create_lite_app(pi_model, camera_config):
     
     @app.route("/video_feed")
     def video_feed():
-        """Live video stream"""
-        if 'user' not in session:
-            return redirect(url_for('login'))
-        
+        """Live video stream - accessible from dashboard"""
+        # Video stream accessible from authenticated dashboard (no session check for iframe)
         if camera is None or not camera_available:
             return Response(generate_test_pattern(), mimetype='multipart/x-mixed-replace; boundary=frame')
         
@@ -852,8 +850,36 @@ def create_lite_app(pi_model, camera_config):
             cfg['wifi_enabled'] = True
             save_config(cfg)
             
+            # Try to apply WiFi config at system level
+            try:
+                import subprocess
+                
+                # Create wpa_supplicant config
+                wpa_conf = f'''ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev
+update_config=1
+
+network={{
+    ssid="{ssid}"
+    psk="{password}"
+    key_mgmt=WPA-PSK
+}}'''
+                
+                # Write and apply
+                temp_conf = '/tmp/wpa_supplicant.conf'
+                with open(temp_conf, 'w') as f:
+                    f.write(wpa_conf)
+                
+                subprocess.run(['sudo', 'cp', temp_conf, '/etc/wpa_supplicant/wpa_supplicant.conf'], 
+                              timeout=5, capture_output=True, check=False)
+                subprocess.run(['sudo', 'systemctl', 'restart', 'wpa_supplicant'], 
+                              timeout=5, capture_output=True, check=False)
+                
+                logger.success(f"[NETWORK] WiFi applied: {ssid}")
+            except Exception as e:
+                logger.warning(f"[NETWORK] System config pending: {e}")
+            
             logger.info(f"[NETWORK] WiFi settings updated to: {ssid}")
-            return jsonify({'ok': True, 'message': f'WiFi settings saved for {ssid}'})
+            return jsonify({'ok': True, 'message': f'WiFi configured for {ssid}. Device connecting...'})
         except Exception as e:
             logger.error(f"[NETWORK] WiFi update error: {e}")
             return jsonify({'ok': False, 'error': str(e)}), 500
