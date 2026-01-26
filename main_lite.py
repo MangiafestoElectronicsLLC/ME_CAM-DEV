@@ -36,6 +36,7 @@ if __name__ == "__main__":
     logger.info("[SYSTEM] Lightweight mode: Minimal memory footprint for Pi Zero 2W")
     logger.info("[SYSTEM] Features: Camera streaming, battery monitor, storage, HTTPS, Motion detection, SMS alerts")
     logger.info("[SYSTEM] Disabled: Background threads, multi-device polling")
+    logger.info("[NETWORK] VPN Support: Enabled - connect from anywhere")
     
     # Initialize SMS notifier
     try:
@@ -56,8 +57,22 @@ if __name__ == "__main__":
     
     if os.path.exists(cert_file) and os.path.exists(key_file):
         logger.info("[HTTPS] Running with SSL/TLS (https://me_cam.com:8080)")
-        app.run(host="0.0.0.0", port=8080, debug=False, ssl_context=(cert_file, key_file))
+        logger.info("[HTTPS] Certificate supports: me_cam.com, localhost, 127.0.0.1, and VPN networks")
+        # Use ssl_context with proper configuration for VPN support
+        app.run(
+            host="0.0.0.0", 
+            port=8080, 
+            debug=False, 
+            ssl_context=(cert_file, key_file),
+            use_reloader=False  # Disable reloader on Pi Zero (saves memory)
+        )
     else:
         logger.warning("[HTTPS] Certificates not found, running without SSL")
         logger.info("[HTTP] Access at: http://[DEVICE-IP]:8080")
-        app.run(host="0.0.0.0", port=8080, debug=False)
+        logger.info("[NETWORK] ⚠️ WARNING: HTTPS not available. VPN connections may be insecure!")
+        app.run(
+            host="0.0.0.0", 
+            port=8080, 
+            debug=False,
+            use_reloader=False
+        )

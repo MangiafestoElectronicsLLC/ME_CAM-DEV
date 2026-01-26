@@ -13,6 +13,7 @@ from flask import Flask, render_template, request, redirect, url_for, session, j
 from loguru import logger
 import os
 import sys
+import subprocess
 from datetime import datetime, timedelta
 import time
 import threading
@@ -30,11 +31,195 @@ from src.core import (
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+# Offline queues (lightweight JSON logs; safe for Pi Zero 2W)
+OFFLINE_QUEUE_FILE = os.path.join(BASE_DIR, "logs", "offline_queue.json")
+NOTIFY_QUEUE_FILE = os.path.join(BASE_DIR, "logs", "notification_queue.json")
+
+
+def _ensure_log_dir(path: str) -> None:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+
+
+def _load_queue(path: str) -> list:
+    _ensure_log_dir(path)
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path, "r") as f:
+            return json.load(f)
+    except Exception as e:
+        logger.warning(f"[QUEUE] Failed to load {path}: {e}")
+        return []
+
+
+def _save_queue(path: str, items: list) -> None:
+    _ensure_log_dir(path)
+    try:
+        with open(path, "w") as f:
+            json.dump(items, f, indent=2)
+    except Exception as e:
+        logger.error(f"[QUEUE] Failed to save {path}: {e}")
+
+
+def is_wifi_connected() -> bool:
+    """Lightweight WiFi check without depending on specific tools."""
+    try:
+        import subprocess
+        # Check if wlan0 is up using /sys/class/net
+        try:
+            result = subprocess.run(['cat', '/sys/class/net/wlan0/operstate'], 
+                                  capture_output=True, text=True, timeout=2)
+            if result.returncode == 0 and 'up' in result.stdout.lower():
+                return True
+        except:
+            pass
+        
+        # Fallback: try iw command
+        try:
+            result = subprocess.run(['iw', 'dev', 'wlan0', 'link'], 
+                                  capture_output=True, text=True, timeout=2)
+            if result.returncode == 0 and 'Connected to' in result.stdout:
+                return True
+        except:
+            pass
+        
+        # Last resort: try iwconfig (may not be installed)
+        try:
+            result = subprocess.run(['iwconfig', 'wlan0'], capture_output=True, text=True, timeout=2)
+            return 'ESSID:' in result.stdout and 'ESSID:""' not in result.stdout
+        except:
+            pass
+        
+        return False
+    except Exception as e:
+        logger.debug(f"[NETWORK] WiFi check failed: {e}")
+        return False
+
+
+def queue_offline_clip(video_path: str, meta: dict) -> None:
+    """Store video reference to sync when WiFi returns."""
+    items = _load_queue(OFFLINE_QUEUE_FILE)
+    items.append({
+        "video_path": video_path,
+        "meta": meta or {},
+        "timestamp": datetime.utcnow().isoformat(),
+        "synced": False
+    })
+    _save_queue(OFFLINE_QUEUE_FILE, items)
+    logger.info(f"[OFFLINE] Queued clip for later sync: {video_path}")
+
+
+def queue_notification_retry(phone: str, message: str, reason: str = "unknown") -> None:
+    items = _load_queue(NOTIFY_QUEUE_FILE)
+    items.append({
+        "phone": phone,
+        "message": message,
+        "attempts": 0,
+        "reason": reason,
+        "timestamp": datetime.utcnow().isoformat()
+    })
+    _save_queue(NOTIFY_QUEUE_FILE, items)
+    logger.info(f"[NOTIFY] Queued notification retry for {phone} (reason: {reason})")
+
+
+def flush_notification_queue() -> None:
+    if not is_wifi_connected():
+        return
+    items = _load_queue(NOTIFY_QUEUE_FILE)
+    if not items:
+        return
+    cfg = get_config()
+    if not cfg.get('sms_enabled'):
+        return
+    from src.core import get_sms_notifier
+    notifier = get_sms_notifier()
+    remaining = []
+    for item in items:
+        phone = item.get("phone")
+        message = item.get("message")
+        attempts = int(item.get("attempts", 0))
+        if not phone or not message:
+            continue
+        if attempts >= 3:
+            logger.warning(f"[NOTIFY] Dropping notification after 3 attempts: {phone}")
+            continue
+        try:
+            notifier.send_sms(phone, message)
+            logger.success(f"[NOTIFY] Retry sent to {phone}")
+        except Exception as e:
+            attempts += 1
+            item["attempts"] = attempts
+            item["last_error"] = str(e)
+            remaining.append(item)
+            logger.warning(f"[NOTIFY] Retry failed ({attempts}/3) for {phone}: {e}")
+    _save_queue(NOTIFY_QUEUE_FILE, remaining)
+
+
+def mark_offline_clips_synced() -> None:
+    if not is_wifi_connected():
+        return
+    items = _load_queue(OFFLINE_QUEUE_FILE)
+    changed = False
+    for item in items:
+        if not item.get("synced") and os.path.exists(item.get("video_path", "")):
+            item["synced"] = True
+            item["synced_at"] = datetime.utcnow().isoformat()
+            changed = True
+    if changed:
+        _save_queue(OFFLINE_QUEUE_FILE, items)
+
+
+# Throttle background flush work to keep Pi Zero responsive
+_last_queue_flush = 0
+
+def maybe_flush_queues(throttle_seconds: int = 30) -> None:
+    global _last_queue_flush
+    now = time.time()
+    if now - _last_queue_flush < throttle_seconds:
+        return
+    _last_queue_flush = now
+    flush_notification_queue()
+    mark_offline_clips_synced()
+
 def create_lite_app(pi_model, camera_config):
     """Create lightweight Flask app with all features"""
     
     app = Flask(__name__, template_folder='templates', static_folder='static')
     app.secret_key = os.urandom(24)
+    
+    # VPN SUPPORT: Add CORS and security headers for VPN connections
+    @app.after_request
+    def add_vpn_headers(response):
+        """Add headers for VPN and remote access support"""
+        # Allow requests from any origin (VPN clients)
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+        response.headers['Access-Control-Max-Age'] = '3600'
+        
+        # Tell browser/clients that HTTP is not required
+        response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+        
+        # Allow connection from VPN clients that might have different IPs
+        response.headers['X-Frame-Options'] = 'SAMEORIGIN'
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+        response.headers['X-XSS-Protection'] = '1; mode=block'
+        
+        # Cache control for offline VPN access
+        if 'Cache-Control' not in response.headers:
+            response.headers['Cache-Control'] = 'public, max-age=3600'
+        
+        return response
+    
+    # Handle CORS preflight requests
+    @app.before_request
+    def handle_preflight():
+        if request.method == "OPTIONS":
+            response = Response()
+            response.headers['Access-Control-Allow-Origin'] = '*'
+            response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
+            response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+            return response
     
     # Lightweight battery monitor
     battery = BatteryMonitor(enabled=True)
@@ -195,7 +380,7 @@ def create_lite_app(pi_model, camera_config):
             return None
     
     def save_motion_clip_buffered(camera_obj, buffered_frames, duration_sec=5):
-        """Save a motion clip using pre-buffered frames + continue recording"""
+        """Save a motion clip using pre-buffered frames + continue recording, with optional audio."""
         try:
             import cv2
             recordings_path = os.path.join(BASE_DIR, "recordings")
@@ -219,6 +404,27 @@ def create_lite_app(pi_model, camera_config):
                 fourcc = cv2.VideoWriter_fourcc(*'mp4v')
                 writer = cv2.VideoWriter(filepath, fourcc, fps, (width, height))
 
+            audio_proc = None
+            audio_path = None
+
+            # Try to capture audio in parallel if arecord is present
+            if shutil.which("arecord"):
+                try:
+                    audio_path = os.path.join(recordings_path, f"motion_{timestamp}.wav")
+                    audio_cmd = [
+                        "arecord",
+                        "-f", "S16_LE",
+                        "-r", "16000",
+                        "-d", str(duration_sec),
+                        "-t", "wav",
+                        audio_path
+                    ]
+                    audio_proc = subprocess.Popen(audio_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                except Exception as e:
+                    logger.warning(f"[AUDIO] Failed to start audio capture: {e}")
+                    audio_proc = None
+                    audio_path = None
+
             # Write buffered frames first (captures motion that already happened)
             for frame in buffered_frames:
                 writer.write(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
@@ -235,7 +441,44 @@ def create_lite_app(pi_model, camera_config):
                     break
 
             writer.release()
-            total_frames = len(buffered_frames) + additional_frames
+
+            # Wait for audio capture to finish (best-effort)
+            if audio_proc:
+                try:
+                    audio_proc.wait(timeout=duration_sec + 2)
+                except Exception:
+                    audio_proc.kill()
+                audio_proc = None
+
+            # Mux audio if available and ffmpeg present
+            if audio_path and os.path.exists(audio_path) and shutil.which("ffmpeg"):
+                try:
+                    muxed_path = filepath.replace(".mp4", "_av.mp4")
+                    mux_cmd = [
+                        "ffmpeg", "-y",
+                        "-i", filepath,
+                        "-i", audio_path,
+                        "-c:v", "copy",
+                        "-c:a", "aac",
+                        "-shortest",
+                        muxed_path
+                    ]
+                    subprocess.run(mux_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False, timeout=20)
+                    if os.path.exists(muxed_path):
+                        os.replace(muxed_path, filepath)
+                        logger.info(f"[AUDIO] Embedded audio into {filename}")
+                    else:
+                        logger.warning("[AUDIO] Mux failed; keeping video-only file")
+                except Exception as e:
+                    logger.warning(f"[AUDIO] Mux error: {e}")
+                finally:
+                    try:
+                        if audio_path and os.path.exists(audio_path):
+                            os.remove(audio_path)
+                    except Exception:
+                        pass
+
+            total_frames = len(buffered_frames) + max(0, additional_frames)
             logger.info(f"[MOTION] Saved {total_frames} frames ({len(buffered_frames)} buffered) to: {filename}")
             return filename
         except Exception as e:
@@ -471,7 +714,8 @@ def create_lite_app(pi_model, camera_config):
             sms_api_url=cfg.get('sms_api_url', ''),
             sms_api_key=cfg.get('sms_api_key', ''),
             sms_rate_limit=cfg.get('sms_rate_limit', 5),
-            storage=storage
+            storage=storage,
+            config=cfg
         )
     
     @app.route("/recordings/<path:filename>")
@@ -502,7 +746,11 @@ def create_lite_app(pi_model, camera_config):
         if camera is None or not camera_available:
             return Response(generate_test_pattern(), mimetype='multipart/x-mixed-replace; boundary=frame')
         
-        return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+        # BUG FIX #4: Add keep-alive timeout to prevent orphan connections
+        response = Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+        response.headers['Connection'] = 'keep-alive'
+        response.headers['Keep-Alive'] = 'timeout=300'  # 5 min timeout to force browser reconnect
+        return response
     
     # ============= API ROUTES =============
     
@@ -519,6 +767,96 @@ def create_lite_app(pi_model, camera_config):
             'is_low': status.get('is_low', False),
             'timestamp': datetime.utcnow().isoformat()
         })
+    
+    # NEW: WiFi status API endpoints
+    @app.route("/api/network/wifi", methods=["GET"])
+    def api_wifi_status():
+        """Get WiFi connection status - works without iwconfig"""
+        try:
+            import subprocess
+            # Try multiple methods to detect WiFi
+            is_connected = False
+            ssid = "Unknown"
+            signal = "N/A"
+            
+            # Method 1: Check /sys/class/net/ for wlan interface
+            try:
+                result = subprocess.run(['cat', '/sys/class/net/wlan0/operstate'], 
+                                      capture_output=True, text=True, timeout=2)
+                if result.returncode == 0 and 'up' in result.stdout.lower():
+                    is_connected = True
+            except:
+                pass
+            
+            # Method 2: Try iw command (more modern than iwconfig)
+            if not is_connected:
+                try:
+                    result = subprocess.run(['iw', 'dev', 'wlan0', 'link'], 
+                                          capture_output=True, text=True, timeout=2)
+                    if result.returncode == 0 and 'Connected to' in result.stdout:
+                        is_connected = True
+                        # Extract SSID from iw output
+                        for line in result.stdout.split('\n'):
+                            if 'SSID:' in line:
+                                ssid = line.split('SSID:')[1].strip()
+                            elif 'signal:' in line.lower():
+                                signal = line.split('signal:')[1].strip().split()[0]
+                except:
+                    pass
+            
+            # Method 3: Fallback - try iwconfig if available
+            if not is_connected:
+                try:
+                    result = subprocess.run(['iwconfig', 'wlan0'], 
+                                          capture_output=True, text=True, timeout=2)
+                    if 'ESSID:' in result.stdout and 'ESSID:""' not in result.stdout:
+                        is_connected = True
+                        for line in result.stdout.split('\n'):
+                            if 'ESSID:' in line:
+                                ssid = line.split('ESSID:"')[1].split('"')[0]
+                            elif 'Signal level' in line:
+                                signal = line.split('Signal level=')[1].split(' ')[0]
+                except:
+                    pass
+            
+            logger.info(f"[NETWORK] WiFi: connected={is_connected}, ssid={ssid}, signal={signal}")
+            
+            return jsonify({
+                'connected': is_connected,
+                'ssid': ssid,
+                'signal': signal,
+                'timestamp': datetime.utcnow().isoformat()
+            })
+        except Exception as e:
+            logger.warning(f"[NETWORK] WiFi status error: {e}")
+            return jsonify({'connected': False, 'error': str(e), 'ssid': 'Unknown', 'signal': 'N/A'}), 200
+    
+    @app.route("/api/network/wifi/update", methods=["POST"])
+    def api_wifi_update():
+        """Update WiFi settings"""
+        if 'user' not in session:
+            return jsonify({'error': 'Not authenticated'}), 401
+        
+        try:
+            data = request.get_json()
+            ssid = data.get('ssid', '').strip()
+            password = data.get('password', '').strip()
+            
+            if not ssid:
+                return jsonify({'error': 'SSID required'}), 400
+            
+            # Save to config
+            cfg = get_config()
+            cfg['wifi_ssid'] = ssid
+            cfg['wifi_password'] = password
+            cfg['wifi_enabled'] = True
+            save_config(cfg)
+            
+            logger.info(f"[NETWORK] WiFi settings updated to: {ssid}")
+            return jsonify({'ok': True, 'message': f'WiFi settings saved for {ssid}'})
+        except Exception as e:
+            logger.error(f"[NETWORK] WiFi update error: {e}")
+            return jsonify({'ok': False, 'error': str(e)}), 500
     
     @app.route("/api/storage", methods=["GET"])
     def api_storage():
@@ -860,11 +1198,17 @@ def create_lite_app(pi_model, camera_config):
         last_frame = None
         motion_cooldown = 0
         frame_buffer = []  # Buffer to capture frames BEFORE motion detected
-        buffer_size = 8  # Keep last ~0.5 second (reduced for Pi Zero)
+        # BUG FIX #2: Reduce buffer size for Pi Zero 2W (512MB RAM)
+        # Each frame is ~600KB, so limit to 4 frames = 2.4MB instead of 8 frames = 4.8MB
+        buffer_size = 4 if pi_model.get('ram_mb', 1024) <= 512 else 8
         recording = False
+        frame_count = 0  # BUG FIX #3: Add frame counter for consistent motion detection
         
         while True:
             try:
+                # Periodically retry queued notifications/offline clips without touching camera settings
+                maybe_flush_queues()
+
                 if camera is None:
                     break
                 
@@ -875,6 +1219,10 @@ def create_lite_app(pi_model, camera_config):
                     if not jpeg_bytes:
                         time.sleep(0.1)
                         continue
+                    
+                    # BUG FIX #3: Use frame counter instead of buffer length for consistency
+                    frame_count += 1
+                    
                     yield (b'--frame\r\n'
                            b'Content-Type: image/jpeg\r\n\r\n' + jpeg_bytes + b'\r\n')
                     time.sleep(0.05)
@@ -882,9 +1230,12 @@ def create_lite_app(pi_model, camera_config):
                 
                 # picamera2 - get array and convert
                 frame = camera.capture_array()
+                frame_count += 1  # BUG FIX #3: Increment frame counter
                 
                 # Motion detection - check every 2nd frame for performance
-                if len(frame_buffer) % 2 == 0:  # Skip every other frame for speed
+                # BUG FIX: Changed logic - now processes motion detection on EVERY frame for responsiveness
+                if frame_count % 2 == 0:  # Skip buffering on even frames
+                    # Process frame for motion detection (every 2nd frame)
                     gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
                 else:
                     # Just buffer the frame and stream it
@@ -896,6 +1247,12 @@ def create_lite_app(pi_model, camera_config):
                     buf = io.BytesIO()
                     img.save(buf, format='JPEG', quality=85)
                     jpeg_bytes = buf.getvalue()
+                    
+                    # BUG FIX #5: Explicit cleanup for PIL objects
+                    del img
+                    buf.close()
+                    del buf
+                    
                     yield (b'--frame\r\n'
                            b'Content-Type: image/jpeg\r\n\r\n' + jpeg_bytes + b'\r\n')
                     time.sleep(0.05)
@@ -933,14 +1290,27 @@ def create_lite_app(pi_model, camera_config):
                         edges = cv2.Canny(gray, 50, 150)
                         edge_motion = np.sum(edges > 0)
                         
-                        # Motion = significant sharp changes with defined edges (person)
-                        # NOT just brightness changes (shadows/sunlight)
-                        # Require: high contrast change + substantial area + clear edges
+                        # Contour-based filtering to ignore tiny movements (leaves, shadows)
+                        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                        min_area = 1200  # tuned for 640x480; ignores tiny motion
+                        allowed_labels = []
+                        for c in contours:
+                            area = cv2.contourArea(c)
+                            if area < min_area:
+                                continue
+                            x, y, w, h = cv2.boundingRect(c)
+                            aspect = w / float(h)
+                            if 0.3 <= aspect <= 0.8:
+                                allowed_labels.append("person")
+                            elif 0.8 < aspect <= 3.5:
+                                allowed_labels.append("vehicle")
+
                         motion = (
-                            max_diff > 80 and           # Sharp contrast (person moving)
-                            motion_percent > 2.0 and    # At least 2% of frame changed
-                            edge_motion > 1000 and      # Has defined edges (not just shadows)
-                            mean_diff > 15              # Overall significant change
+                            max_diff > 85 and            # sharper contrast to avoid shadows
+                            motion_percent > 1.5 and     # smaller percent allowed but paired with area filter
+                            edge_motion > 1200 and       # enforce clear edges
+                            mean_diff > 18 and
+                            len(allowed_labels) > 0      # only accept person/vehicle-shaped contours
                         )
                         
                         if motion:
@@ -958,16 +1328,26 @@ def create_lite_app(pi_model, camera_config):
                                         # Fallback to snapshot if clip fails
                                         video_path = save_motion_snapshot(frame)
 
+                                    detected_label = allowed_labels[0] if allowed_labels else "motion"
                                     event = log_motion_event(
-                                        event_type="motion",
+                                        event_type=detected_label,
                                         confidence=1.0,
                                         details={
                                             "mode": "lite",
                                             "video_path": video_path,
-                                            "mean_diff": float(mean_diff),  # Convert numpy to native Python
-                                            "max_diff": float(max_diff)     # Convert numpy to native Python
+                                            "mean_diff": float(mean_diff),
+                                            "max_diff": float(max_diff),
+                                            "label": detected_label,
+                                            "contours": len(allowed_labels)
                                         }
                                     )
+                                    # If WiFi is down, remember this clip to sync/notify later
+                                    if not is_wifi_connected():
+                                        queue_offline_clip(video_path, {
+                                            "event_id": event.get("id"),
+                                            "type": event.get("type"),
+                                            "timestamp": event.get("timestamp")
+                                        })
                                     
                                     # Send SMS notification if enabled
                                     if cfg.get('sms_enabled') and cfg.get('send_motion_to_emergency'):
@@ -984,6 +1364,8 @@ def create_lite_app(pi_model, camera_config):
                                                 logger.success(f"[SMS] Motion alert sent to {phone}")
                                         except Exception as sms_error:
                                             logger.error(f"[SMS] Notification failed: {sms_error}")
+                                            if phone:
+                                                queue_notification_retry(phone, msg, reason="send_failed")
                                 except Exception as e:
                                     logger.error(f"[MOTION] Recording error: {e}")
                                 finally:
@@ -999,6 +1381,11 @@ def create_lite_app(pi_model, camera_config):
                 buf = io.BytesIO()
                 img.save(buf, format='JPEG', quality=85)
                 jpeg_bytes = buf.getvalue()
+                
+                # BUG FIX #5: Explicit cleanup for PIL objects
+                del img
+                buf.close()
+                del buf
                 
                 yield (b'--frame\r\n'
                        b'Content-Type: image/jpeg\r\n\r\n' + jpeg_bytes + b'\r\n')

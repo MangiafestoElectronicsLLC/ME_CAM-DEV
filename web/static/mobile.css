@@ -1,170 +1,324 @@
 /* ============================================
-   ME_CAM Mobile Support - Responsive Design
+   ME_CAM Mobile & Tablet Support - Responsive Design
+   Optimized for Pi Zero 2W Dashboard (Lite & Main)
    ============================================ */
 
-/* Tablets and smaller desktops */
-@media (max-width: 1024px) {
-    .main-content {
-        grid-template-columns: 1fr !important;
-    }
+:root {
+    --safe-area-inset-left: env(safe-area-inset-left, 0);
+    --safe-area-inset-right: env(safe-area-inset-right, 0);
+    --safe-area-inset-top: env(safe-area-inset-top, 0);
+    --safe-area-inset-bottom: env(safe-area-inset-bottom, 0);
+}
 
+/* ===== TABLETS (768px - 1024px) ===== */
+@media (max-width: 1024px) and (min-width: 768px) {
     .container {
         padding: 12px;
+        max-width: 100%;
+    }
+
+    .main-content {
+        grid-template-columns: 1.5fr 1fr;
+        gap: 12px;
     }
 
     .header {
         flex-direction: column;
-        gap: 15px;
+        gap: 12px;
         text-align: center;
-        padding: 15px 20px;
+        padding: 12px 15px;
+        align-items: flex-start;
     }
 
     .header h1 {
-        font-size: 22px;
+        font-size: 20px;
     }
 
     .status-bar {
         flex-wrap: wrap;
-        gap: 15px;
+        gap: 12px;
         justify-content: center;
-        padding: 12px 20px;
+        padding: 12px 15px;
+    }
+
+    .status-grid {
+        grid-template-columns: repeat(2, 1fr);
     }
 
     button {
-        font-size: 16px;
-        padding: 12px 16px;
+        font-size: 14px;
+        padding: 10px 14px;
+    }
+
+    .camera-feed {
+        max-height: 50vh;
+    }
+
+    /* Tablet-specific optimizations */
+    .navbar {
+        padding: 8px 12px;
+        gap: 8px;
+    }
+
+    .nav-toggle {
+        display: none;
+    }
+
+    .nav-menu {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        width: 100%;
+    }
+
+    .quick-stats {
+        grid-template-columns: repeat(4, 1fr);
+        gap: 8px;
+        margin-bottom: 12px;
+    }
+
+    .quick-stat {
+        padding: 8px;
+        font-size: 13px;
+    }
+
+    .info-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .control-buttons {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
     }
 }
 
-/* Mobile phones (< 768px) */
+/* ===== MOBILE PHONES (< 768px) ===== */
 @media (max-width: 767px) {
     * {
         -webkit-tap-highlight-color: transparent;
     }
 
+    html,
     body {
+        width: 100vw;
         overflow-x: hidden;
     }
 
     .container {
         padding: 8px;
-        max-width: 100%;
+        max-width: 100vw;
+        padding-left: max(8px, var(--safe-area-inset-left));
+        padding-right: max(8px, var(--safe-area-inset-right));
+        padding-top: max(8px, var(--safe-area-inset-top));
     }
 
+    /* === HEADER & NAVBAR === */
     .header {
         flex-direction: column;
-        gap: 10px;
-        padding: 12px 15px;
-        margin-bottom: 12px;
+        gap: 8px;
+        padding: 10px 12px;
+        margin-bottom: 10px;
+        border-radius: 8px;
     }
 
     .header h1 {
-        font-size: 20px;
+        font-size: 18px;
         margin: 0;
     }
 
+    .header-left,
+    .header-right {
+        width: 100%;
+    }
+
+    .header-right {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        justify-content: flex-start;
+    }
+
     .lite-badge {
-        font-size: 11px;
-        padding: 4px 12px;
+        font-size: 10px;
+        padding: 3px 10px;
     }
 
     .status-bar {
         flex-direction: column;
-        padding: 12px 15px;
-        margin-bottom: 12px;
-        gap: 10px;
-        align-items: flex-start;
+        padding: 10px 12px;
+        margin-bottom: 10px;
+        gap: 8px;
+        align-items: stretch;
     }
 
     .status-item {
         width: 100%;
-        font-size: 13px;
+        font-size: 12px;
+        justify-content: space-between;
     }
 
+    /* === MAIN CONTENT LAYOUT === */
     .main-content {
         grid-template-columns: 1fr;
-        gap: 12px;
-        margin-bottom: 12px;
+        gap: 10px;
+        margin-bottom: 10px;
     }
 
     .camera-panel,
     .info-panel,
     .controls-panel {
-        padding: 12px;
-        border-radius: 10px;
+        padding: 10px;
+        border-radius: 8px;
         margin-bottom: 0;
     }
 
+    .camera-feed,
     .camera-panel img,
     .camera-panel video {
         max-width: 100%;
         height: auto;
-        border-radius: 8px;
+        border-radius: 6px;
+        aspect-ratio: 16/9;
     }
 
+    /* === BUTTONS & CONTROLS === */
     .control-buttons {
         display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 6px;
+    }
+
+    button,
+    .btn {
+        font-size: 13px;
+        padding: 9px 11px;
+        border-radius: 6px;
+        width: 100%;
+        min-height: 44px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    button.large,
+    .btn.large {
+        grid-column: 1 / -1;
+    }
+
+    /* === INFO & STATUS GRID === */
+    .info-grid {
         grid-template-columns: 1fr 1fr;
         gap: 8px;
     }
 
-    button {
-        font-size: 14px;
-        padding: 10px 12px;
-        border-radius: 8px;
-        width: 100%;
-    }
-
-    button.large {
-        grid-column: 1 / -1;
-    }
-
-    .info-grid {
-        grid-template-columns: 1fr 1fr;
-        gap: 10px;
-    }
-
     .info-item {
-        padding: 10px;
-        font-size: 12px;
-    }
-
-    .info-item label {
+        padding: 8px;
         font-size: 11px;
     }
 
+    .info-item label {
+        font-size: 10px;
+    }
+
     .info-item .value {
-        font-size: 14px;
+        font-size: 13px;
     }
 
     .battery-bar {
-        height: 6px;
-        margin-top: 6px;
+        height: 5px;
+        margin-top: 5px;
     }
 
+    .status-grid {
+        grid-template-columns: 1fr;
+        gap: 8px;
+        margin-bottom: 10px;
+    }
+
+    .status-card {
+        padding: 10px;
+        border-radius: 8px;
+    }
+
+    .status-card-label {
+        font-size: 11px;
+    }
+
+    .status-card-value {
+        font-size: 14px;
+    }
+
+    /* === QUICK STATS === */
+    .quick-stats {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 6px;
+        margin-bottom: 10px;
+    }
+
+    .quick-stat {
+        padding: 8px;
+        font-size: 12px;
+        border-radius: 6px;
+    }
+
+    .quick-stat-label {
+        font-size: 10px;
+        display: block;
+        margin-bottom: 3px;
+    }
+
+    .quick-stat-value {
+        font-size: 14px;
+        font-weight: bold;
+    }
+
+    /* === NAVIGATION === */
     .navbar {
-        padding: 10px 12px;
-        gap: 10px;
+        padding: 8px 10px;
+        gap: 6px;
         flex-wrap: wrap;
         justify-content: space-between;
     }
 
     .navbar .brand {
-        font-size: 18px;
+        font-size: 16px;
+        order: 1;
     }
 
-    .nav-links {
+    .nav-toggle {
+        order: 2;
+        font-size: 18px;
+        padding: 4px 8px;
+        min-width: 36px;
+        min-height: 36px;
+    }
+
+    .nav-menu {
+        width: 100%;
+        order: 3;
         flex-wrap: wrap;
-        gap: 5px;
+        gap: 4px;
+        display: none;
+        padding: 8px 0 0 0;
+    }
+
+    .nav-menu.active {
+        display: flex;
     }
 
     .nav-links a,
-    .nav-links button {
+    .nav-links button,
+    .nav-menu a {
         font-size: 12px;
-        padding: 6px 10px;
+        padding: 8px 10px;
+        min-height: 36px;
+        display: flex;
+        align-items: center;
+        flex: 1;
+        min-width: 45%;
     }
 
-    /* Form elements */
+    /* === FORMS & INPUTS === */
     input[type="text"],
     input[type="email"],
     input[type="password"],
@@ -184,74 +338,87 @@
 
     label {
         display: block;
-        font-size: 12px;
-        margin-bottom: 6px;
+        font-size: 11px;
+        margin-bottom: 5px;
         font-weight: 500;
     }
 
-    /* Tables */
+    /* === TABLES === */
     table {
-        font-size: 12px;
+        font-size: 11px;
         overflow-x: auto;
         display: block;
+        width: 100%;
     }
 
     th,
     td {
-        padding: 8px;
+        padding: 8px 6px;
+        text-align: left;
     }
 
-    /* Cards */
+    thead {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+    }
+
+    /* === CARDS & MODALS === */
     .card {
-        padding: 12px;
+        padding: 10px;
         margin-bottom: 10px;
         border-radius: 8px;
     }
 
-    /* Modal/Dialog adjustments */
     .modal {
         max-width: 95vw;
+        max-height: 90vh;
         margin: 0 auto;
-        border-radius: 12px;
+        border-radius: 10px;
+        padding: max(10px, var(--safe-area-inset-left)) max(10px, var(--safe-area-inset-right)) max(10px, var(--safe-area-inset-bottom)) max(10px, var(--safe-area-inset-left));
     }
 
     .modal-content {
-        padding: 16px;
+        padding: 12px;
         max-height: 80vh;
         overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
     }
 
-    /* Landscape orientation (small tablets, phones in landscape) */
+    /* === LANDSCAPE MODE (< 768px && landscape) === */
     @media (max-width: 767px) and (orientation: landscape) {
         .container {
             padding: 6px;
         }
 
         .header {
-            padding: 8px 12px;
+            padding: 8px 10px;
             margin-bottom: 8px;
         }
 
         .header h1 {
-            font-size: 18px;
+            font-size: 16px;
         }
 
         .status-bar {
-            padding: 8px 12px;
+            padding: 8px 10px;
             margin-bottom: 8px;
             flex-direction: row;
             flex-wrap: wrap;
-            gap: 12px;
+            gap: 8px;
         }
 
         .main-content {
             grid-template-columns: 1fr 1fr;
             gap: 8px;
+            margin-bottom: 8px;
         }
 
-        button {
+        button,
+        .btn {
             font-size: 12px;
             padding: 8px 10px;
+            min-height: 40px;
         }
 
         .camera-panel {
@@ -268,61 +435,98 @@
             grid-column: 2;
             grid-row: 2;
         }
+
+        .camera-feed {
+            aspect-ratio: 16/10;
+        }
+
+        .quick-stats {
+            grid-template-columns: repeat(4, 1fr);
+            gap: 4px;
+            margin-bottom: 8px;
+        }
+
+        .quick-stat {
+            padding: 6px;
+            font-size: 11px;
+        }
+    }
+
+    /* === EXTRA SMALL PHONES (< 480px) === */
+    @media (max-width: 479px) {
+        .container {
+            padding: 6px;
+        }
+
+        .header {
+            padding: 8px 10px;
+            margin-bottom: 8px;
+        }
+
+        .header h1 {
+            font-size: 16px;
+        }
+
+        .status-item {
+            font-size: 11px;
+        }
+
+        .control-buttons {
+            grid-template-columns: 1fr;
+        }
+
+        .navbar {
+            padding: 6px 8px;
+            gap: 4px;
+        }
+
+        .nav-links {
+            width: 100%;
+            order: 3;
+            flex-basis: 100%;
+        }
+
+        button,
+        .btn {
+            font-size: 12px;
+            padding: 8px;
+        }
+
+        .quick-stats {
+            grid-template-columns: 1fr;
+        }
+
+        .info-grid {
+            grid-template-columns: 1fr;
+        }
     }
 }
 
-/* Extra small phones (< 480px) */
-@media (max-width: 479px) {
-    .container {
-        padding: 6px;
-    }
-
-    .header {
-        padding: 10px 12px;
-        margin-bottom: 10px;
-    }
-
-    .header h1 {
-        font-size: 18px;
-    }
-
-    .status-item {
-        font-size: 12px;
-    }
-
-    .control-buttons {
-        grid-template-columns: 1fr;
-    }
-
-    .navbar {
-        padding: 8px 10px;
-        gap: 6px;
-    }
-
-    .nav-links {
-        width: 100%;
-        order: 3;
-        flex-basis: 100%;
-    }
-}
-
-/* Touch-friendly button sizes */
+/* ===== TOUCH DEVICE OPTIMIZATION ===== */
 @media (hover: none) and (pointer: coarse) {
 
     button,
     a.button,
-    .clickable {
+    .clickable,
+    input,
+    select,
+    textarea {
         min-height: 44px;
         min-width: 44px;
-        padding: 12px 16px;
         font-size: 16px;
+    }
+
+    button,
+    a.button,
+    .clickable {
+        padding: 12px 16px;
     }
 
     input,
     select,
     textarea {
-        font-size: 16px;
         padding: 12px;
+        font-size: 16px;
     }
 
     .nav-links a {
@@ -331,9 +535,24 @@
         align-items: center;
         padding: 0 12px;
     }
+
+    /* Increase spacing for touch targets */
+    .status-item {
+        padding: 8px 0;
+    }
+
+    .metric {
+        padding: 10px 0;
+    }
+
+    /* Add active states for touch feedback */
+    button:active,
+    a:active {
+        opacity: 0.8;
+    }
 }
 
-/* Dark mode support */
+/* ===== DARK MODE SUPPORT ===== */
 @media (prefers-color-scheme: dark) {
     body {
         background: #0a0a0a;
@@ -351,13 +570,27 @@
     .card,
     .camera-panel,
     .info-panel,
-    .controls-panel {
+    .controls-panel,
+    .status-card,
+    .modal-content {
         background: #1a1a1a;
         color: #e0e0e0;
     }
+
+    .header,
+    .status-bar,
+    .info-card {
+        background: rgba(26, 26, 26, 0.95);
+    }
+
+    input:focus,
+    select:focus,
+    textarea:focus {
+        border-color: #667eea;
+    }
 }
 
-/* Print styles (for manual/documentation) */
+/* ===== PRINT STYLES (For documentation/manual) ===== */
 @media print {
     body {
         background: white;
@@ -366,7 +599,8 @@
 
     .navbar,
     .status-bar,
-    button {
+    button,
+    .nav-toggle {
         display: none;
     }
 
@@ -374,4 +608,32 @@
         max-width: 100%;
         padding: 0;
     }
+
+    .header,
+    .status-card,
+    .info-card {
+        page-break-inside: avoid;
+        box-shadow: none;
+        border: 1px solid #ddd;
+    }
+}
+
+/* ===== ACCESSIBILITY IMPROVEMENTS ===== */
+@media (prefers-reduced-motion: reduce) {
+    * {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+}
+
+/* ===== FOCUS VISIBLE FOR KEYBOARD NAVIGATION ===== */
+:focus-visible {
+    outline: 2px solid #667eea;
+    outline-offset: 2px;
+}
+
+button:focus-visible,
+a:focus-visible {
+    outline: 2px dashed #667eea;
 }
