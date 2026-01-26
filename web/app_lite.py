@@ -813,8 +813,9 @@ def create_lite_app(pi_model, camera_config):
                     cfg = get_config()
                     if cfg.get('wifi_ssid'):
                         ssid = cfg.get('wifi_ssid')
-                except:
-                    pass
+                        logger.info(f"[NETWORK] Using SSID from config: {ssid}")
+                except Exception as e:
+                    logger.error(f"[NETWORK] Config fallback failed: {e}")
             
             # Method 4: Get signal strength from /proc/net/wireless
             if is_connected:
