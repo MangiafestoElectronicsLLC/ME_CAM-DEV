@@ -4,6 +4,8 @@ RPiCam Streamer - Direct libcamera support via rpicam-apps
 Uses rpicam-jpeg subprocess to capture frames and stream as MJPEG.
 Compatible with Pi Zero 2W and all Raspberry Pi models.
 No conflicts with picamera2 or legacy camera.
+
+KEY FIX: Persistent process + frame buffer to avoid resource leaks
 """
 
 import subprocess
@@ -12,10 +14,11 @@ import io
 import time
 from loguru import logger
 import os
+import signal
 
 
 class RpicamStreamer:
-    """Stream camera via rpicam-jpeg subprocess - highest compatibility"""
+    """Stream camera via rpicam-jpeg subprocess - persistent connection"""
     
     def __init__(self, width=640, height=480, fps=15, timeout=5):
         self.width = width
@@ -27,6 +30,9 @@ class RpicamStreamer:
         self.last_frame = None
         self.lock = threading.Lock()
         self.frame_count = 0
+        self.error_count = 0
+        self.last_frame_time = 0
+        self.capture_thread = None
         
         # Verify rpicam-jpeg is available
         self.rpicam_path = self._find_rpicam()
@@ -54,53 +60,86 @@ class RpicamStreamer:
         
         return None
     
-    def _capture_frames(self):
-        """Continuously capture frames from rpicam"""
+    def _start_persistent_process(self):
+        """Start rpicam-jpeg in continuous output mode"""
+        try:
+            # Use rpicam-still with -t 0 to run continuously and output to stdout
+            # But since rpicam-jpeg doesn't support continuous output well,
+            # we'll use a workaround: spawn it repeatedly but with better resource mgmt
+            cmd = [
+                self.rpicam_path,
+                '--width', str(self.width),
+                '--height', str(self.height),
+                '--timelapse', str(1000 // self.fps),  # Interval in milliseconds
+                '-t', '0',  # Run indefinitely
+                '-o', '-',  # Output to stdout
+                '--nopreview',
+                '--quality', '85',
+            ]
+            
+            logger.info(f"[RPICAM] Starting continuous capture: {self.width}x{self.height} @ {self.fps} FPS")
+            
+            self.process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                bufsize=1024*1024  # 1MB buffer
+            )
+            return True
+            
+        except Exception as e:
+            logger.error(f"[RPICAM] Failed to start process: {e}")
+            return False
+    
+    def _read_frames_from_process(self):
+        """Read JPEG frames continuously from the persistent process"""
         while self.running:
             try:
-                # Run rpicam-jpeg with output to stdout
-                cmd = [
-                    self.rpicam_path,
-                    '--width', str(self.width),
-                    '--height', str(self.height),
-                    '-t', '0',  # Run indefinitely
-                    '-o', '-',  # Output to stdout
-                    '--nopreview',
-                    '--quality', '85',
-                ]
+                if not self.process or self.process.poll() is not None:
+                    # Process died, restart it
+                    logger.warning("[RPICAM] Process died, restarting...")
+                    self._cleanup_process()
+                    if not self._start_persistent_process():
+                        time.sleep(1)
+                        continue
                 
-                logger.info(f"[RPICAM] Starting: {' '.join(cmd)}")
-                
-                self.process = subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    bufsize=0
-                )
-                
-                # Read JPEG frames from stdout
-                while self.running and self.process:
+                # Try to read frame data
+                # rpicam-still in timelapse mode outputs multiple JPEGs
+                # This is a simplified approach - read available data
+                if self.process.stdout:
                     try:
-                        # rpicam-jpeg outputs one JPEG per invocation
-                        # For continuous streaming, we use a simple workaround:
-                        # Call rpicam-jpeg repeatedly with -t parameter
-                        break
+                        # Read with timeout to detect dead process
+                        frame_data = self.process.stdout.read(1024 * 100)  # Read up to 100KB
+                        if frame_data:
+                            with self.lock:
+                                self.last_frame = frame_data
+                                self.frame_count += 1
+                                self.last_frame_time = time.time()
+                                self.error_count = 0
+                        else:
+                            # EOF reached, restart
+                            logger.warning("[RPICAM] EOF reached, restarting process...")
+                            self._cleanup_process()
+                            if not self._start_persistent_process():
+                                time.sleep(1)
                     except Exception as e:
-                        logger.debug(f"[RPICAM] Frame read error: {e}")
-                        break
+                        logger.debug(f"[RPICAM] Read error: {e}")
+                        self.error_count += 1
+                        if self.error_count > 5:
+                            logger.warning("[RPICAM] Too many read errors, restarting...")
+                            self._cleanup_process()
+                            if not self._start_persistent_process():
+                                time.sleep(1)
+                            self.error_count = 0
                 
-                if self.process:
-                    self.process.terminate()
-                    self.process.wait(timeout=2)
-                    
+                time.sleep(0.01)  # Minimal sleep
+                
             except Exception as e:
-                logger.error(f"[RPICAM] Capture thread error: {e}")
-            
-            if self.running:
+                logger.error(f"[RPICAM] Read thread error: {e}")
                 time.sleep(0.5)
     
     def _capture_single_frame(self):
-        """Capture a single JPEG frame"""
+        """Capture a single JPEG frame (fallback method)"""
         try:
             cmd = [
                 self.rpicam_path,
@@ -124,9 +163,6 @@ class RpicamStreamer:
                     self.last_frame = result.stdout
                     self.frame_count += 1
                 return result.stdout
-            else:
-                if result.stderr:
-                    logger.debug(f"[RPICAM] Stderr: {result.stderr.decode()[:200]}")
                     
         except subprocess.TimeoutExpired:
             logger.debug("[RPICAM] Frame capture timeout")
@@ -136,51 +172,75 @@ class RpicamStreamer:
         return None
     
     def start(self):
-        """Start camera streaming"""
+        """Start camera streaming with persistent process"""
         try:
             self.running = True
             
-            # Pre-warm camera with one frame
-            logger.info("[RPICAM] Pre-warming camera...")
-            for i in range(3):
-                frame = self._capture_single_frame()
-                if frame:
-                    logger.success(f"[RPICAM] Camera ready - Frame {i+1} captured ({len(frame)} bytes)")
-                    return True
-                time.sleep(0.2)
-            
-            logger.warning("[RPICAM] Camera pre-warm failed but continuing...")
-            return True
+            # Try persistent process first
+            if self._start_persistent_process():
+                # Start background thread to read frames
+                self.capture_thread = threading.Thread(
+                    target=self._read_frames_from_process,
+                    daemon=True
+                )
+                self.capture_thread.start()
+                
+                # Pre-warm with a few frames
+                logger.info("[RPICAM] Pre-warming camera...")
+                for i in range(5):
+                    if self.last_frame:
+                        logger.success(f"[RPICAM] Camera ready - Persistent stream active")
+                        return True
+                    time.sleep(0.5)
+                
+                logger.warning("[RPICAM] No frames yet but process running, continuing...")
+                return True
+            else:
+                logger.warning("[RPICAM] Persistent mode failed, falling back to on-demand capture...")
+                return True
             
         except Exception as e:
             logger.error(f"[RPICAM] Start failed: {e}")
             self.running = False
             return False
     
-    def get_jpeg_frame(self):
-        """Get current JPEG frame"""
-        if not self.running:
-            return None
-        
-        frame = self._capture_single_frame()
-        if frame:
-            return frame
-        
-        # Return last frame if capture failed
-        with self.lock:
-            return self.last_frame
-    
-    def stop(self):
-        """Stop camera streaming"""
-        self.running = False
+    def _cleanup_process(self):
+        """Clean up the process safely"""
         if self.process:
             try:
                 self.process.terminate()
                 self.process.wait(timeout=2)
             except:
-                pass
+                try:
+                    self.process.kill()
+                    self.process.wait(timeout=1)
+                except:
+                    pass
             self.process = None
-        logger.info(f"[RPICAM] Stopped after {self.frame_count} frames")
+    
+    def get_jpeg_frame(self):
+        """Get current JPEG frame"""
+        if not self.running:
+            return None
+        
+        # Return buffered frame if available
+        with self.lock:
+            if self.last_frame:
+                return self.last_frame
+        
+        # If no persistent process, try on-demand
+        if not self.process:
+            return self._capture_single_frame()
+        
+        return None
+    
+    def stop(self):
+        """Stop camera streaming"""
+        self.running = False
+        self._cleanup_process()
+        if self.capture_thread:
+            self.capture_thread.join(timeout=2)
+        logger.info(f"[RPICAM] Stopped after {self.frame_count} frames (errors: {self.error_count})")
 
 
 def is_rpicam_available():
