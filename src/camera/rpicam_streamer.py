@@ -190,18 +190,19 @@ class RpicamStreamer:
             self.process = None
     
     def get_jpeg_frame(self):
-        """Get current JPEG frame"""
+        """Get current JPEG frame - captures fresh frame on each call"""
         if not self.running:
             return None
         
-        # Return buffered frame if available
+        # Always capture a fresh frame for live streaming
+        frame = self._capture_single_frame()
+        if frame:
+            return frame
+        
+        # Fallback to buffered frame if capture fails
         with self.lock:
             if self.last_frame:
                 return self.last_frame
-        
-        # If no persistent process, try on-demand
-        if not self.process:
-            return self._capture_single_frame()
         
         return None
     
