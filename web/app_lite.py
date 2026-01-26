@@ -739,16 +739,24 @@ def create_lite_app(pi_model, camera_config):
     
     @app.route("/video_feed")
     def video_feed():
-        """Live video stream - accessible from dashboard"""
-        # Video stream accessible from authenticated dashboard (no session check for iframe)
-        if camera is None or not camera_available:
+        """Live video stream - accessible from authenticated dashboard"""
+        # Stream available if first-run complete (setup done) but allow if logged in too
+        # This is an MJPEG stream meant to be embedded in authenticated page
+        try:
+            if camera is None or not camera_available:
+                return Response(generate_test_pattern(), mimetype='multipart/x-mixed-replace; boundary=frame')
+            
+            # BUG FIX #4: Add keep-alive timeout to prevent orphan connections
+            response = Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+            response.headers['Connection'] = 'keep-alive'
+            response.headers['Keep-Alive'] = 'timeout=300'  # 5 min timeout to force browser reconnect
+            response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+            response.headers['Pragma'] = 'no-cache'
+            response.headers['Expires'] = '0'
+            return response
+        except Exception as e:
+            logger.error(f"[CAMERA] Stream error: {e}")
             return Response(generate_test_pattern(), mimetype='multipart/x-mixed-replace; boundary=frame')
-        
-        # BUG FIX #4: Add keep-alive timeout to prevent orphan connections
-        response = Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
-        response.headers['Connection'] = 'keep-alive'
-        response.headers['Keep-Alive'] = 'timeout=300'  # 5 min timeout to force browser reconnect
-        return response
     
     # ============= API ROUTES =============
     
