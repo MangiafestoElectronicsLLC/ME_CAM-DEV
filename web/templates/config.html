@@ -401,8 +401,11 @@
 
             <div class="divider"></div>
 
-            <!-- Save Button -->
-            <button type="submit">💾 Save Configuration</button>
+            <!-- Save Button & Reboot Button -->
+            <div style="display: flex; gap: 10px; justify-content: space-between;">
+                <button type="submit">💾 Save Configuration</button>
+                <button type="button" onclick="confirmReboot()" style="background: #ff9800; color: white; padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; transition: background 0.3s;">🔄 Reboot Device</button>
+            </div>
         </form>
     </div>
 
@@ -475,6 +478,33 @@
                 }
             } catch (err) {
                 loading.classList.remove('active');
+                showNotification('❌ Error: ' + err.message, 'error');
+            }
+        }
+
+        async function confirmReboot() {
+            if (!confirm('⚠️ Device will reboot in 1 minute. Make sure to save your settings first. Continue?')) {
+                return;
+            }
+
+            try {
+                showNotification('🔄 Sending reboot command...', 'info');
+                const response = await fetch('/api/system/reboot', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+
+                const data = await response.json();
+                if (data.ok) {
+                    showNotification('✅ ' + data.message + ' Browser may lose connection briefly.', 'success');
+                    setTimeout(() => {
+                        showNotification('📡 Device rebooting... Reconnecting...', 'info');
+                        setTimeout(() => window.location.href = '/', 70000); // Reconnect after ~70 seconds
+                    }, 3000);
+                } else {
+                    showNotification('❌ Reboot failed: ' + (data.error || 'Unknown error'), 'error');
+                }
+            } catch (err) {
                 showNotification('❌ Error: ' + err.message, 'error');
             }
         }

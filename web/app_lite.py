@@ -766,30 +766,6 @@ def create_lite_app(pi_model, camera_config):
             'timestamp': datetime.utcnow().isoformat()
         })
     
-    @app.route("/api/wifi", methods=["GET"])
-    def api_wifi():
-        """WiFi status - quick endpoint"""
-        try:
-            import subprocess
-            is_connected = False
-            ssid = "Unknown"
-            signal = "N/A"
-            
-            try:
-                result = subprocess.run(['iwconfig', 'wlan0'], capture_output=True, text=True, timeout=2)
-                if 'ESSID:' in result.stdout and 'ESSID:""' not in result.stdout:
-                    is_connected = True
-                    for line in result.stdout.split('\n'):
-                        if 'ESSID:' in line:
-                            ssid = line.split('ESSID:"')[1].split('"')[0]
-            except:
-                pass
-            
-            return jsonify({'connected': is_connected, 'ssid': ssid, 'signal': signal})
-        except Exception as e:
-            logger.error(f"[WIFI] API error: {e}")
-            return jsonify({'connected': False, 'ssid': 'Unknown', 'signal': 'N/A', 'error': str(e)})
-    
     # NEW: WiFi status API endpoints
     @app.route("/api/network/wifi", methods=["GET"])
     def api_wifi_status():
@@ -1463,5 +1439,23 @@ network={{
                    b'Content-Type: image/jpeg\r\n\r\n' + jpeg_bytes + b'\r\n')
             
             time.sleep(0.1)
+    
+    # ============= SYSTEM ROUTES =============
+    
+    @app.route("/api/system/reboot", methods=["POST"])
+    def api_system_reboot():
+        """Reboot the device"""
+        if 'user' not in session:
+            return jsonify({'error': 'Not authenticated'}), 401
+        
+        try:
+            import subprocess
+            logger.warning("[SYSTEM] Reboot requested by user")
+            # Schedule reboot in 5 seconds to allow response to be sent
+            subprocess.Popen(['sudo', 'shutdown', '-r', '+1'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return jsonify({'ok': True, 'message': 'Device rebooting in 1 minute...'})
+        except Exception as e:
+            logger.error(f"[SYSTEM] Reboot failed: {e}")
+            return jsonify({'ok': False, 'error': str(e)}), 500
     
     return app

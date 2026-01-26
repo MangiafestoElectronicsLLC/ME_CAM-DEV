@@ -263,7 +263,7 @@
 
         // Load WiFi status
         function loadWiFiStatus() {
-            fetch('/api/wifi')
+            fetch('/api/network/wifi')
                 .then(r => r.json())
                 .then(data => {
                     let html = '';
