@@ -427,7 +427,7 @@
                 // Build proper path for API endpoint
                 const fullPath = videoPath ? `/api/motion/video/${videoPath}` : null;
                 const videoButton = fullPath ?
-                    `<button class="btn-delete" style="background: #2196F3;" onclick="viewMedia('${fullPath}', ${isVideo})">📹 ${isVideo ? 'Video' : 'Image'}</button>` :
+                    `<button class="btn-delete" style="background: #2196F3;" onclick="viewMedia('${fullPath}', ${isVideo}, '${videoPath}')">📹 ${isVideo ? 'Watch' : 'View'}</button>` :
                     '';
 
                 return `
@@ -445,8 +445,9 @@
                         </div>
                         <div class="event-actions">
                             ${videoButton}
-                            <button class="btn-delete" style="background: #FF9800;" onclick="saveEventToFile('${event.id}', '${formattedTime}')">💾 Save</button>
-                            <button class="btn-delete" onclick="deleteEvent('${event.id}')">Delete</button>
+                            <button class="btn-delete" style="background: #4CAF50;" onclick="downloadMediaDirect('${fullPath}', '${videoPath}')">⬇️ Download</button>
+                            <button class="btn-delete" style="background: #FF9800;" onclick="shareMedia('${fullPath}', '${formattedTime}')">📤 Share</button>
+                            <button class="btn-delete" onclick="deleteEvent('${event.id}')">🗑️ Delete</button>
                         </div>
                     </div>
                 `;
@@ -466,20 +467,20 @@
                 });
         }
 
-        function viewMedia(path, isVideo) {
+        function viewMedia(path, isVideo, filename) {
             const modal = document.getElementById('mediaModal');
             const content = document.getElementById('mediaContent');
 
             if (isVideo) {
                 content.innerHTML = `
                     <div style="position: relative; width: 100%; text-align: center;">
-                        <video controls autoplay muted style="max-width: 100%; max-height: 80vh; border-radius: 8px; background: #000;">
+                        <video controls autoplay style="max-width: 100%; max-height: 80vh; border-radius: 8px; background: #000;">
                             <source src="${path}" type="video/mp4">
                             Your browser does not support the video tag.
                         </video>
                         <div style="margin-top: 15px; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
-                            <button onclick="downloadMedia('${path}', 'video')" style="padding: 10px 20px; background: #4CAF50; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 14px;">⬇️ Download</button>
-                            <button onclick="shareMedia('${path}');" style="padding: 10px 20px; background: #2196F3; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 14px;">📤 Share</button>
+                            <button onclick="downloadMedia('${path}', 'video', '${filename}')" style="padding: 10px 20px; background: #4CAF50; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 14px;">⬇️ Download to Device</button>
+                            <button onclick="shareMedia('${path}', '${filename}');" style="padding: 10px 20px; background: #2196F3; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 14px;">📤 Share</button>
                         </div>
                     </div>
                 `;
@@ -488,8 +489,8 @@
                     <div style="position: relative; text-align: center;">
                         <img src="${path}" alt="Motion capture" style="max-width: 100%; max-height: 80vh; border-radius: 8px;">
                         <div style="margin-top: 15px; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
-                            <button onclick="downloadMedia('${path}', 'image')" style="padding: 10px 20px; background: #4CAF50; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 14px;">⬇️ Download</button>
-                            <button onclick="shareMedia('${path}');" style="padding: 10px 20px; background: #2196F3; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 14px;">📤 Share</button>
+                            <button onclick="downloadMedia('${path}', 'image', '${filename}')" style="padding: 10px 20px; background: #4CAF50; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 14px;">⬇️ Download to Device</button>
+                            <button onclick="shareMedia('${path}', '${filename}');" style="padding: 10px 20px; background: #2196F3; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 14px;">📤 Share</button>
                         </div>
                     </div>
                 `;
@@ -498,39 +499,93 @@
             modal.classList.add('active');
         }
 
-        function downloadMedia(path, type) {
-            const filename = path.split('/').pop();
+        function downloadMedia(path, type, filename) {
+            // Download directly to user's device (phone/computer)
+            if (!filename) {
+                filename = path.split('/').pop();
+            }
+
+            showNotification('📥 Downloading to your device...', 'success');
+
             const xhr = new XMLHttpRequest();
             xhr.open('GET', path, true);
             xhr.responseType = 'blob';
             xhr.onload = function () {
-                const blob = xhr.response;
-                const url = window.URL.createObjectURL(blob);
-                const link = document.createElement('a');
-                link.href = url;
-                link.download = filename;
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
-                window.URL.revokeObjectURL(url);
+                if (xhr.status === 200) {
+                    const blob = xhr.response;
+                    const url = window.URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = filename;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    window.URL.revokeObjectURL(url);
+                    showNotification('✅ Downloaded to your device!', 'success');
+                } else {
+                    showNotification('❌ Download failed', 'error');
+                }
+            };
+            xhr.onerror = function () {
+                showNotification('❌ Download failed', 'error');
             };
             xhr.send();
         }
 
-        function shareMedia(path) {
-            const filename = path.split('/').pop();
-            const timestamp = new Date().toLocaleString('en-US', { timeZone: 'America/New_York' });
-            const message = `Motion event recorded at ${timestamp}. File: ${filename}`;
+        function downloadMediaDirect(path, filename) {
+            // Quick download without opening modal
+            if (!path || path === 'null') {
+                showNotification('❌ No video available', 'error');
+                return;
+            }
+            downloadMedia(path, 'video', filename);
+        }
 
+        function shareMedia(path, timestamp) {
+            if (!path || path === 'null') {
+                showNotification('❌ No video available to share', 'error');
+                return;
+            }
+
+            const filename = path.split('/').pop();
+            const timeStr = timestamp || new Date().toLocaleString('en-US');
+            const message = `🎯 ME Camera Motion Event\nRecorded: ${timeStr}\nFile: ${filename}`;
+            const fullUrl = window.location.origin + path;
+
+            // Try native share API (works on mobile devices)
             if (navigator.share) {
                 navigator.share({
-                    title: 'Motion Event',
+                    title: 'ME Camera - Motion Event',
                     text: message,
-                    url: path
+                    url: fullUrl
+                }).then(() => {
+                    showNotification('✅ Shared successfully!', 'success');
+                }).catch((error) => {
+                    if (error.name !== 'AbortError') {
+                        // Fallback to copy link
+                        copyToClipboard(fullUrl);
+                    }
                 });
             } else {
-                prompt('Share this link:', window.location.origin + path);
+                // Desktop fallback - copy link to clipboard
+                copyToClipboard(fullUrl);
             }
+        }
+
+        function copyToClipboard(text) {
+            const textarea = document.createElement('textarea');
+            textarea.value = text;
+            textarea.style.position = 'fixed';
+            textarea.style.opacity = '0';
+            document.body.appendChild(textarea);
+            textarea.select();
+            try {
+                document.execCommand('copy');
+                showNotification('📋 Link copied to clipboard!', 'success');
+            } catch (err) {
+                showNotification('❌ Failed to copy link', 'error');
+            }
+            document.body.removeChild(textarea);
         }
 
         function closeModal() {
@@ -565,31 +620,6 @@
             notif.textContent = message;
             notif.className = `notification ${type}`;
             setTimeout(() => notif.className = 'notification', 3000);
-        }
-
-        function saveEventToFile(eventId, timestamp) {
-            fetch('/api/motion/events')
-                .then(r => r.json())
-                .then(data => {
-                    const events = data.events || [];
-                    const event = events.find(e => e.id === eventId);
-                    if (!event) {
-                        showNotification('Event not found', 'error');
-                        return;
-                    }
-
-                    const eventData = JSON.stringify(event, null, 2);
-                    const blob = new Blob([eventData], { type: 'application/json' });
-                    const url = URL.createObjectURL(blob);
-                    const link = document.createElement('a');
-                    link.href = url;
-                    link.download = `motion_event_${eventId}_${timestamp.replace(/[^0-9]/g, '')}.json`;
-                    document.body.appendChild(link);
-                    link.click();
-                    document.body.removeChild(link);
-                    URL.revokeObjectURL(url);
-                    showNotification('Event saved as JSON', 'success');
-                });
         }
 
         // Load events on page load and refresh every 5 seconds

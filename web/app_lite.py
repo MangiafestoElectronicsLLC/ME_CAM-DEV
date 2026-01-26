@@ -349,7 +349,7 @@ def create_lite_app(pi_model, camera_config):
             height, width, _ = frame.shape
             # Use H.264 codec (x264) which all browsers support
             fourcc = cv2.VideoWriter_fourcc(*'avc1')  # H.264 / AVC
-            fps = 15.0  # Balanced FPS for Pi Zero
+            fps = 20.0  # Increased FPS for smoother video
             writer = cv2.VideoWriter(filepath, fourcc, fps, (width, height))
 
             if not writer.isOpened():
@@ -396,7 +396,7 @@ def create_lite_app(pi_model, camera_config):
             
             height, width, _ = buffered_frames[0].shape
             fourcc = cv2.VideoWriter_fourcc(*'avc1')  # H.264
-            fps = 15.0
+            fps = 20.0  # Increased FPS for smoother motion capture
             writer = cv2.VideoWriter(filepath, fourcc, fps, (width, height))
 
             if not writer.isOpened():
@@ -730,10 +730,7 @@ def create_lite_app(pi_model, camera_config):
     
     @app.route("/motion-events", methods=["GET"])
     def motion_events_page():
-        """View motion events"""
-        if 'user' not in session:
-            return redirect(url_for('login'))
-        
+        """View motion events - no auth required for view"""
         events = get_motion_events()
         return render_template('motion_events.html', events=events)
     
@@ -908,10 +905,7 @@ network={{
     
     @app.route("/api/motion/events", methods=["GET"])
     def api_motion_events():
-        """Get motion events with optional time filtering"""
-        if 'user' not in session:
-            return jsonify({'error': 'Not authenticated'}), 401
-        
+        """Get motion events with optional time filtering - no auth required for read"""
         try:
             all_events = get_motion_events()
             
@@ -1171,20 +1165,14 @@ network={{
 
     @app.route("/api/nanny-cam/status", methods=["GET"])
     def api_nanny_status():
-        """Get nanny cam enabled status"""
-        if 'user' not in session:
-            return jsonify({'error': 'Not authenticated'}), 401
-
+        """Get nanny cam enabled status - no auth required"""
         cfg = get_config()
         enabled = cfg.get('nanny_cam_enabled', False)
         return jsonify({'enabled': enabled})
 
     @app.route("/api/nanny-cam/toggle", methods=["POST"])
     def api_nanny_toggle():
-        """Toggle nanny cam mode (disables motion logging/recording when on)"""
-        if 'user' not in session:
-            return jsonify({'error': 'Not authenticated'}), 401
-
+        """Toggle nanny cam mode (disables motion logging/recording when on) - no auth required"""
         try:
             data = request.get_json()
             enabled = bool(data.get('enabled', False))
@@ -1383,9 +1371,14 @@ network={{
                 video_path = os.path.join(recordings_path, video_filename)
                 
                 # Use H.264 codec for browser compatibility
-                fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # MP4 codec
+                fourcc = cv2.VideoWriter_fourcc(*'avc1')  # H.264 codec
                 fps = 20.0
                 out = cv2.VideoWriter(video_path, fourcc, fps, (w, h))
+                
+                if not out.isOpened():
+                    logger.warning("[MOTION] H.264 not available, using mp4v")
+                    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                    out = cv2.VideoWriter(video_path, fourcc, fps, (w, h))
                 
                 if not out.isOpened():
                     logger.error("[MOTION] Could not open video writer")
@@ -1398,7 +1391,7 @@ network={{
                 out.release()
                 
                 file_size = os.path.getsize(video_path) / (1024 * 1024)
-                logger.success(f"[MOTION] Video saved: {video_filename} ({file_size:.1f}MB)")
+                logger.success(f"[MOTION] Video saved: {video_filename} ({file_size:.1f}MB, {len(frames_list)} frames)")
                 
                 # Update motion event with video path
                 try:
@@ -1408,14 +1401,24 @@ network={{
                             events = json.load(f)
                         
                         # Find the event by ID and update it
+                        updated = False
                         for event in events:
                             if event.get('id') == event_id:
                                 event['has_video'] = True
                                 event['video_path'] = video_filename
+                                if 'details' not in event:
+                                    event['details'] = {}
+                                event['details']['video_path'] = video_filename
+                                event['details']['mode'] = 'lite'
+                                updated = True
+                                logger.info(f"[MOTION] Updated event {event_id} with video: {video_filename}")
                                 break
                         
-                        with open(events_path, 'w') as f:
-                            json.dump(events, f, indent=2)
+                        if updated:
+                            with open(events_path, 'w') as f:
+                                json.dump(events, f, indent=2)
+                        else:
+                            logger.warning(f"[MOTION] Could not find event {event_id} to update")
                 except Exception as e:
                     logger.error(f"[MOTION] Could not update event metadata: {e}")
             
@@ -1448,8 +1451,8 @@ network={{
                             # Add to frame buffer for pre-motion recording
                             frame_buffer.append(frame.copy())
                             
-                            # Motion detection (every 2nd frame for performance)
-                            if frame_count % 2 == 0:
+                            # Motion detection (every frame for fast response)
+                            if True:
                                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                                 
                                 if last_frame is not None:
@@ -1474,7 +1477,7 @@ network={{
                                         recording = True
                                         recording_frames = list(frame_buffer)  # Pre-motion frames
                                         recording_start = time.time()
-                                        motion_cooldown = 30
+                                        motion_cooldown = 20  # ~1 second cooldown for faster response
                                         
                                         logger.info(f"[MOTION] Recording started with {len(recording_frames)} pre-motion frames")
                                 
@@ -1501,7 +1504,7 @@ network={{
                     
                     yield (b'--frame\r\n'
                            b'Content-Type: image/jpeg\r\n\r\n' + jpeg_bytes + b'\r\n')
-                    time.sleep(0.05)
+                    time.sleep(0.0167)  # ~60 FPS for ultra-responsive streaming
                     continue
                 
                 # picamera2 - get array and convert
@@ -1531,7 +1534,7 @@ network={{
                     
                     yield (b'--frame\r\n'
                            b'Content-Type: image/jpeg\r\n\r\n' + jpeg_bytes + b'\r\n')
-                    time.sleep(0.05)
+                    time.sleep(0.033)
                     continue
                 
                 gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
@@ -1582,10 +1585,10 @@ network={{
                                 allowed_labels.append("vehicle")
 
                         motion = (
-                            max_diff > 85 and            # sharper contrast to avoid shadows
-                            motion_percent > 1.5 and     # smaller percent allowed but paired with area filter
-                            edge_motion > 1200 and       # enforce clear edges
-                            mean_diff > 18 and
+                            max_diff > 75 and            # more sensitive contrast detection
+                            motion_percent > 1.2 and     # lower threshold for faster detection
+                            edge_motion > 1000 and       # slightly more permissive edges
+                            mean_diff > 15 and
                             len(allowed_labels) > 0      # only accept person/vehicle-shaped contours
                         )
                         
@@ -1647,8 +1650,8 @@ network={{
                                 finally:
                                     recording = False
 
-                            # Cooldown: 45 frames (~3 sec) to avoid duplicate triggers
-                            motion_cooldown = 45
+                            # Cooldown: 20 frames (~1 sec) to avoid duplicate triggers
+                            motion_cooldown = 20
                 
                 last_frame = gray
                 
@@ -1666,7 +1669,7 @@ network={{
                 yield (b'--frame\r\n'
                        b'Content-Type: image/jpeg\r\n\r\n' + jpeg_bytes + b'\r\n')
                 
-                time.sleep(0.05)  # ~20 FPS
+                time.sleep(0.033)  # ~30 FPS for better responsiveness
             except Exception as e:
                 logger.debug(f"[CAMERA] Frame error: {e}")
                 break
