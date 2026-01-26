@@ -784,22 +784,39 @@ def create_lite_app(pi_model, camera_config):
             ssid = "Unknown"
             signal = "N/A"
             
-            # Method 1: Use wpa_cli (most reliable on Raspberry Pi)
+            # Method 1: Check if interface is up
             try:
-                # Try with full path (wpa_cli may be in /usr/sbin)
-                result = subprocess.run(['/usr/sbin/wpa_cli', '-i', 'wlan0', 'status'], 
-                                      capture_output=True, text=True, timeout=2)
-                if result.returncode == 0:
-                    for line in result.stdout.split('\n'):
-                        if line.startswith('ssid='):
-                            ssid = line.split('=', 1)[1].strip()
-                            is_connected = True
-                        elif line.startswith('wpa_state=') and 'COMPLETED' in line:
-                            is_connected = True
+                with open('/sys/class/net/wlan0/operstate', 'r') as f:
+                    state = f.read().strip()
+                    if state == 'up':
+                        is_connected = True
             except:
                 pass
             
-            # Method 2: Get signal strength from /proc/net/wireless
+            # Method 2: Try to get SSID from wpa_cli
+            if is_connected:
+                try:
+                    result = subprocess.run(['/usr/sbin/wpa_cli', '-i', 'wlan0', 'status'], 
+                                          capture_output=True, text=True, timeout=2)
+                    if result.returncode == 0 and result.stdout:
+                        for line in result.stdout.split('\n'):
+                            if line.startswith('ssid='):
+                                ssid = line.split('=', 1)[1].strip()
+                                break
+                except Exception as e:
+                    logger.debug(f"[NETWORK] wpa_cli error: {e}")
+            
+            # Method 3: Fallback to config if still Unknown
+            if ssid == "Unknown":
+                try:
+                    from src.core import get_config
+                    cfg = get_config()
+                    if cfg.get('wifi_ssid'):
+                        ssid = cfg.get('wifi_ssid')
+                except:
+                    pass
+            
+            # Method 4: Get signal strength from /proc/net/wireless
             if is_connected:
                 try:
                     with open('/proc/net/wireless', 'r') as f:
@@ -810,21 +827,7 @@ def create_lite_app(pi_model, camera_config):
                                 if len(parts) >= 4:
                                     signal_value = parts[3].rstrip('.')
                                     signal = f"{signal_value} dBm"
-                except:
-                    pass
-            
-            # Method 3: Fallback - check if interface is up and get SSID from config
-            if not is_connected or ssid == "Unknown":
-                try:
-                    result = subprocess.run(['cat', '/sys/class/net/wlan0/operstate'], 
-                                          capture_output=True, text=True, timeout=2)
-                    if result.returncode == 0 and 'up' in result.stdout.lower():
-                        is_connected = True
-                        # Try to get SSID from config as fallback
-                        from src.core import get_config
-                        cfg = get_config()
-                        if cfg.get('wifi_ssid') and ssid == "Unknown":
-                            ssid = cfg.get('wifi_ssid')
+                                    break
                 except:
                     pass
             
