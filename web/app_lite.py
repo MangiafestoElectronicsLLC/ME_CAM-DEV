@@ -778,6 +778,7 @@ def create_lite_app(pi_model, camera_config):
     @app.route("/api/network/wifi", methods=["GET"])
     def api_wifi_status():
         """Get WiFi connection status - works with wpa_cli"""
+        # Note: This endpoint doesn't require auth so dashboard can always fetch WiFi status
         try:
             import subprocess
             is_connected = False
