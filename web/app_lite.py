@@ -786,7 +786,8 @@ def create_lite_app(pi_model, camera_config):
             
             # Method 1: Use wpa_cli (most reliable on Raspberry Pi)
             try:
-                result = subprocess.run(['wpa_cli', '-i', 'wlan0', 'status'], 
+                # Try with full path (wpa_cli may be in /usr/sbin)
+                result = subprocess.run(['/usr/sbin/wpa_cli', '-i', 'wlan0', 'status'], 
                                       capture_output=True, text=True, timeout=2)
                 if result.returncode == 0:
                     for line in result.stdout.split('\n'):
