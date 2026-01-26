@@ -780,38 +780,27 @@ def create_lite_app(pi_model, camera_config):
         """Get WiFi connection status - works without iwconfig"""
         try:
             import subprocess
-            # Try multiple methods to detect WiFi
             is_connected = False
             ssid = "Unknown"
             signal = "N/A"
             
-            # Method 1: Check /sys/class/net/ for wlan interface
+            # Method 1: Try iw command first (most reliable for SSID)
             try:
-                result = subprocess.run(['cat', '/sys/class/net/wlan0/operstate'], 
+                result = subprocess.run(['iw', 'dev', 'wlan0', 'link'], 
                                       capture_output=True, text=True, timeout=2)
-                if result.returncode == 0 and 'up' in result.stdout.lower():
+                if result.returncode == 0 and 'Connected to' in result.stdout:
                     is_connected = True
+                    # Extract SSID from iw output
+                    for line in result.stdout.split('\n'):
+                        if 'SSID:' in line:
+                            ssid = line.split('SSID:')[1].strip()
+                        elif 'signal:' in line.lower():
+                            signal = line.split('signal:')[1].strip().split()[0]
             except:
                 pass
             
-            # Method 2: Try iw command (more modern than iwconfig)
-            if not is_connected:
-                try:
-                    result = subprocess.run(['iw', 'dev', 'wlan0', 'link'], 
-                                          capture_output=True, text=True, timeout=2)
-                    if result.returncode == 0 and 'Connected to' in result.stdout:
-                        is_connected = True
-                        # Extract SSID from iw output
-                        for line in result.stdout.split('\n'):
-                            if 'SSID:' in line:
-                                ssid = line.split('SSID:')[1].strip()
-                            elif 'signal:' in line.lower():
-                                signal = line.split('signal:')[1].strip().split()[0]
-                except:
-                    pass
-            
-            # Method 3: Fallback - try iwconfig if available
-            if not is_connected:
+            # Method 2: Fallback - try iwconfig if available
+            if not is_connected or ssid == "Unknown":
                 try:
                     result = subprocess.run(['iwconfig', 'wlan0'], 
                                           capture_output=True, text=True, timeout=2)
@@ -822,6 +811,21 @@ def create_lite_app(pi_model, camera_config):
                                 ssid = line.split('ESSID:"')[1].split('"')[0]
                             elif 'Signal level' in line:
                                 signal = line.split('Signal level=')[1].split(' ')[0]
+                except:
+                    pass
+            
+            # Method 3: Check if interface is up (basic connectivity check)
+            if not is_connected:
+                try:
+                    result = subprocess.run(['cat', '/sys/class/net/wlan0/operstate'], 
+                                          capture_output=True, text=True, timeout=2)
+                    if result.returncode == 0 and 'up' in result.stdout.lower():
+                        is_connected = True
+                        # Try to get SSID from config as fallback
+                        from src.core import get_config
+                        cfg = get_config()
+                        if cfg.get('wifi_ssid'):
+                            ssid = cfg.get('wifi_ssid')
                 except:
                     pass
             

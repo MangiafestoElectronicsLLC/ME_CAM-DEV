@@ -402,9 +402,10 @@
             <div class="divider"></div>
 
             <!-- Save Button & Reboot Button -->
-            <div style="display: flex; gap: 10px; justify-content: space-between;">
-                <button type="submit">💾 Save Configuration</button>
-                <button type="button" onclick="confirmReboot()" style="background: #ff9800; color: white; padding: 12px 24px; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; transition: background 0.3s;">🔄 Reboot Device</button>
+            <div class="divider"></div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 30px;">
+                <button type="submit" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 15px 30px; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 14px; transition: all 0.3s; width: 100%;">💾 Save Configuration</button>
+                <button type="button" onclick="confirmReboot()" style="background: linear-gradient(135deg, #ff9800 0%, #f57c00 100%); color: white; padding: 15px 30px; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 14px; transition: all 0.3s; width: 100%;">🔄 Reboot Device</button>
             </div>
         </form>
     </div>
