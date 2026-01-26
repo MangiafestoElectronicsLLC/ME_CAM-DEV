@@ -1265,6 +1265,40 @@ network={{
                     # BUG FIX #3: Use frame counter instead of buffer length for consistency
                     frame_count += 1
                     
+                    # Motion detection for JPEG streams (decode -> detect -> encode)
+                    if motion_cooldown == 0 and frame_count % 2 == 0:
+                        try:
+                            # Decode JPEG to numpy array for motion detection
+                            nparr = np.frombuffer(jpeg_bytes, np.uint8)
+                            frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                            
+                            if frame is not None:
+                                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                                
+                                if last_frame is not None:
+                                    # Calculate frame difference
+                                    diff = cv2.absdiff(last_frame, gray)
+                                    _, thresh = cv2.threshold(diff, 25, 255, cv2.THRESH_BINARY)
+                                    motion_pixels = cv2.countNonZero(thresh)
+                                    total_pixels = gray.shape[0] * gray.shape[1]
+                                    motion_ratio = motion_pixels / total_pixels
+                                    
+                                    cfg = get_config()
+                                    motion_threshold = cfg.get('motion_threshold', 0.02)
+                                    
+                                    if motion_ratio > motion_threshold:
+                                        logger.info(f"[MOTION] Motion detected: {motion_ratio*100:.1f}% pixels changed")
+                                        # Log motion event
+                                        log_motion_event('motion', motion_ratio, {'threshold': motion_threshold})
+                                        motion_cooldown = 30  # 30 frame cooldown (~1.5 seconds)
+                                
+                                last_frame = gray
+                        except Exception as e:
+                            logger.debug(f"[MOTION] Detection error: {e}")
+                    
+                    if motion_cooldown > 0:
+                        motion_cooldown -= 1
+                    
                     yield (b'--frame\r\n'
                            b'Content-Type: image/jpeg\r\n\r\n' + jpeg_bytes + b'\r\n')
                     time.sleep(0.05)

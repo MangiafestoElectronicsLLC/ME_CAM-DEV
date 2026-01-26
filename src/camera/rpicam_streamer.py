@@ -151,8 +151,22 @@ class RpicamStreamer:
         
         return None
     
+    def _continuous_capture(self):
+        """Background thread to continuously capture frames"""
+        while self.running:
+            try:
+                frame = self._capture_single_frame()
+                if frame:
+                    with self.lock:
+                        self.last_frame = frame
+                        self.frame_count += 1
+                time.sleep(0.05)  # ~20 FPS
+            except Exception as e:
+                logger.debug(f"[RPICAM] Continuous capture error: {e}")
+                time.sleep(0.1)
+    
     def start(self):
-        """Start camera using single-frame capture mode (most reliable)"""
+        """Start camera using background capture thread for better performance"""
         try:
             self.running = True
             
@@ -164,10 +178,14 @@ class RpicamStreamer:
                     self.last_frame = frame
                     self.frame_count = 1
                     logger.success(f"[RPICAM] Camera ready - Frame {i+1} captured ({len(frame)} bytes)")
-                    return True
+                    break
                 time.sleep(0.3)
             
-            logger.warning("[RPICAM] No frames captured but continuing...")
+            # Start background capture thread for continuous streaming
+            self.capture_thread = threading.Thread(target=self._continuous_capture, daemon=True)
+            self.capture_thread.start()
+            logger.info("[RPICAM] Background capture thread started")
+            
             return True
             
         except Exception as e:
@@ -190,16 +208,11 @@ class RpicamStreamer:
             self.process = None
     
     def get_jpeg_frame(self):
-        """Get current JPEG frame - captures fresh frame on each call"""
+        """Get current JPEG frame - returns buffered frame from background thread"""
         if not self.running:
             return None
         
-        # Always capture a fresh frame for live streaming
-        frame = self._capture_single_frame()
-        if frame:
-            return frame
-        
-        # Fallback to buffered frame if capture fails
+        # Return buffered frame captured by background thread
         with self.lock:
             if self.last_frame:
                 return self.last_frame
