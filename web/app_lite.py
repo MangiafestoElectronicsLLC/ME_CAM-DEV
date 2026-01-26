@@ -908,24 +908,49 @@ network={{
     
     @app.route("/api/motion/events", methods=["GET"])
     def api_motion_events():
-        """Get motion events"""
+        """Get motion events with optional time filtering"""
         if 'user' not in session:
             return jsonify({'error': 'Not authenticated'}), 401
         
         try:
-            events = get_motion_events()
+            all_events = get_motion_events()
+            
+            # Get query parameters
+            hours = request.args.get('hours', type=int, default=None)
+            limit = request.args.get('limit', type=int, default=None)
+            
+            # Filter by time if hours parameter provided
+            from datetime import datetime, timedelta, timezone
+            now = datetime.now(timezone.utc)
+            
+            filtered_events = []
+            if hours:
+                cutoff_time = now - timedelta(hours=hours)
+                for event in all_events:
+                    try:
+                        # Parse timestamp (handles timezone offsets)
+                        event_dt = datetime.fromisoformat(event['timestamp'].replace('Z', '+00:00'))
+                        if event_dt >= cutoff_time:
+                            filtered_events.append(event)
+                    except:
+                        # If parsing fails, include the event
+                        filtered_events.append(event)
+            else:
+                filtered_events = all_events
+            
+            # Apply limit if specified
+            if limit and len(filtered_events) > limit:
+                filtered_events = filtered_events[-limit:]  # Get most recent
             
             # Calculate statistics
-            from datetime import datetime, timedelta
-            now = datetime.now()
             today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
             
-            total = len(events)
+            total = len(filtered_events)
             today_count = 0
             latest_time = None
             by_type = {}
             
-            for event in events:
+            for event in filtered_events:
                 # Count by type
                 event_type = event.get('type', 'unknown')
                 by_type[event_type] = by_type.get(event_type, 0) + 1
@@ -944,9 +969,9 @@ network={{
             
             # Latest timestamp (raw string so frontend can render in local timezone)
             latest_raw = None
-            if events:
+            if filtered_events:
                 # events are chronological; take last item
-                latest_raw = events[-1].get('timestamp')
+                latest_raw = filtered_events[-1].get('timestamp')
 
             statistics = {
                 'total': total,
@@ -956,7 +981,7 @@ network={{
             }
             
             return jsonify({
-                'events': events,
+                'events': filtered_events,
                 'count': total,
                 'statistics': statistics
             })
