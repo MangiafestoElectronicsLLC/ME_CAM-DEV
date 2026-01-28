@@ -284,8 +284,24 @@ def ensure_first_run_redirect():
     if is_first_run() and request.path not in ("/setup", "/setup/save"):
         return redirect(url_for("setup"))
 
-@app.route("/setup", methods=["GET"])
+@app.route("/setup", methods=["GET", "POST"])
 def setup():
+    if request.method == "POST":
+        cfg = get_config()
+        cfg["device_name"] = request.form.get("device_name", cfg["device_name"])
+        cfg["pin_enabled"] = request.form.get("pin_enabled") == "on"
+        cfg["pin_code"] = request.form.get("pin_code") or cfg["pin_code"]
+        cfg["storage"]["retention_days"] = int(request.form.get("retention_days") or 7)
+        cfg["storage"]["motion_only"] = request.form.get("motion_only") == "on"
+        cfg["storage"]["encrypt"] = request.form.get("encrypt") == "on"
+        cfg["detection"]["person_only"] = request.form.get("person_only") == "on"
+        cfg["detection"]["sensitivity"] = float(request.form.get("sensitivity") or 0.6)
+        cfg["emergency_phone"] = request.form.get("emergency_phone", "")
+        save_config(cfg)
+        mark_first_run_complete()
+        logger.info("[SETUP] First run completed.")
+        return redirect(url_for("index"))
+    
     cfg = get_config()
     
     # Generate QR code for setup
@@ -293,23 +309,6 @@ def setup():
     setup_url = f"http://raspberrypi.local:8080/setup"
     
     return render_template("first_run.html", config=cfg, qr_code=qr_code, setup_url=setup_url)
-
-@app.route("/setup/save", methods=["POST"])
-def setup_save():
-    cfg = get_config()
-    cfg["device_name"] = request.form.get("device_name", cfg["device_name"])
-    cfg["pin_enabled"] = request.form.get("pin_enabled") == "on"
-    cfg["pin_code"] = request.form.get("pin_code") or cfg["pin_code"]
-    cfg["storage"]["retention_days"] = int(request.form.get("retention_days") or 7)
-    cfg["storage"]["motion_only"] = request.form.get("motion_only") == "on"
-    cfg["storage"]["encrypt"] = request.form.get("encrypt") == "on"
-    cfg["detection"]["person_only"] = request.form.get("person_only") == "on"
-    cfg["detection"]["sensitivity"] = float(request.form.get("sensitivity") or 0.6)
-    cfg["emergency_phone"] = request.form.get("emergency_phone", "")
-    save_config(cfg)
-    mark_first_run_complete()
-    logger.info("[SETUP] First run completed.")
-    return redirect(url_for("index"))
 
 @app.route("/login", methods=["GET", "POST"])
 def login():

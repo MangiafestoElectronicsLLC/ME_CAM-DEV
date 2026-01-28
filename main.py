@@ -5,7 +5,18 @@ import sys
 # Add src to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
-from web.app import app, fast_motion_detector
+# Auto-detect Pi Zero 2W and load LITE version
+from src.utils.pi_detect import get_pi_model, get_ram_mb
+pi_model = get_pi_model()
+ram_mb = get_ram_mb()
+
+if "Zero 2W" in pi_model or ram_mb <= 512:
+    logger.info(f"[MAIN] Pi Zero 2W detected ({ram_mb}MB RAM) - Loading LITE v2.1")
+    from web.app_lite import app, fast_motion_detector
+else:
+    logger.info(f"[MAIN] Standard Pi detected ({ram_mb}MB RAM) - Loading full version")
+    from web.app import app, fast_motion_detector
+
 from src.detection import motion_service
 from src.core import get_sms_notifier
 
