@@ -31,13 +31,15 @@ class FastCameraStreamer:
     This is why your Tkinter GUI is faster!
     """
     
-    def __init__(self, width=640, height=480, fps=15):
+    def __init__(self, width=640, height=480, fps=40, performance_mode=True):
         self.width = width
         self.height = height
         self.fps = fps
+        self.performance_mode = performance_mode
+        self.jpeg_quality = 70 if performance_mode else 85  # 70 = fast, 85 = high quality
         self.camera = None
         self.running = False
-        self.frame_queue = Queue(maxsize=2)  # Small queue for latest frames
+        self.frame_queue = Queue(maxsize=4)  # Increased from 2 for smoother flow and motion detection
         self.current_jpeg = None
         self.lock = Lock()
         self.capture_thread = None
@@ -86,8 +88,8 @@ class FastCameraStreamer:
                 # Capture frame from camera (FAST - already streaming!)
                 array = self.camera.capture_array()
                 
-                # Convert to JPEG (fast in-memory operation)
-                _, jpeg = cv2.imencode('.jpg', array, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                # Convert to JPEG with performance quality (lower quality = faster encoding)
+                _, jpeg = cv2.imencode('.jpg', array, [cv2.IMWRITE_JPEG_QUALITY, self.jpeg_quality])
                 jpeg_bytes = jpeg.tobytes()
                 
                 # Update current frame

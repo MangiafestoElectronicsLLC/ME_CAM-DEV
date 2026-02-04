@@ -64,15 +64,16 @@ fast_motion_detector = None
 
 if fast_streamer_available and use_fast:
     try:
-        # Initialize fast streamer (picamera2 - 15-30 FPS!)
+        # Initialize fast streamer (picamera2 - optimized for 35-40 FPS!)
         resolution = cfg.get('camera', {}).get('resolution', '640x480')
         width, height = map(int, resolution.split('x'))
-        fps = cfg.get('camera', {}).get('stream_fps', 15)
+        fps = cfg.get('camera', {}).get('stream_fps', 40)  # Increased from 15 to 40
         
-        camera_streamer = FastCameraStreamer(width=width, height=height, fps=fps)
+        # Use performance mode for faster streaming (lower JPEG quality but much faster)
+        camera_streamer = FastCameraStreamer(width=width, height=height, fps=fps, performance_mode=True)
         if camera_streamer.start():
             camera_available = True
-            logger.success(f"[CAMERA] Fast streamer initialized: {width}x{height} @ {fps} FPS")
+            logger.success(f"[CAMERA] Fast streamer initialized: {width}x{height} @ {fps} FPS (performance mode)")
             
             # Initialize fast motion detector
             fast_motion_detector = FastMotionDetector(camera_streamer, cfg)
@@ -379,6 +380,13 @@ def index():
         battery_status = battery.get_status()
         videos = get_recordings(cfg, limit=12)
         storage_used = get_storage_used_gb(cfg)
+        try:
+            import shutil
+            rec_path = _recordings_path(cfg)
+            total, used, _ = shutil.disk_usage(rec_path)
+            storage_percent = int((used / total) * 100) if total > 0 else 0
+        except Exception:
+            storage_percent = 0
         history_count = count_recent_events(cfg, hours=24)
         
         # Get better battery percentage (100% if external power)
@@ -388,7 +396,7 @@ def index():
         elif battery_percent is None:
             battery_percent = 80  # Default assumption
         
-        return render_template("user_dashboard.html",
+        return render_template("dashboard_v2.2.3.html",
             username=username,
             device_name=cfg.get("device_name", "ME_CAM_1"),
             status=status,
@@ -396,10 +404,12 @@ def index():
             battery_external=battery_status.get("external_power"),
             battery_low=battery_status.get("is_low"),
             storage_used=storage_used,
+            storage_percent=storage_percent,
             video_count=len(videos),
             videos=videos,
             history_count=history_count,
-            emergency_phone=cfg.get("emergency_phone", "Not configured")
+            emergency_phone=cfg.get("emergency_phone", "Not configured"),
+            version="2.2.3-FULL"
         )
     except Exception as e:
         logger.warning(f"[DASHBOARD] Fallback: {e}")

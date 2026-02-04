@@ -22,5 +22,9 @@ pydrive2==1.19.0
 # Logging helpers
 loguru==0.7.2
 
-# Note: opencv-python-headless and tflite-runtime require specific builds
-# Install manually if needed
+# Note: OpenCV is installed via system package (python3-opencv)
+# to avoid NumPy 2.x compatibility issues on Pi Zero 2W
+# Use venv with --system-site-packages to access it
+
+# Note: tflite-runtime requires specific builds
+# Install manually if needed for advanced features

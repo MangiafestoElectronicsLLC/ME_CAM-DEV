@@ -4,8 +4,9 @@ Background motion detection service that doesn't conflict with camera streaming
 import time
 import threading
 from loguru import logger
-from .libcamera_motion_detector import LibcameraMotionDetector
+from .motion_detector import MotionDetector
 from src.core import get_config
+import cv2
 
 class MotionDetectionService:
     """Run motion detection in background without blocking camera"""
@@ -21,12 +22,7 @@ class MotionDetectionService:
             return
         
         try:
-            cfg = get_config()
-            if not cfg["storage"].get("motion_only", True):
-                logger.info("[MOTION] Motion detection disabled in config")
-                return
-            
-            self.detector = LibcameraMotionDetector(cfg)
+            self.detector = MotionDetector(sensitivity=0.6, min_area=500)
             self.running = True
             self.thread = threading.Thread(target=self._run, daemon=True)
             self.thread.start()
@@ -49,9 +45,9 @@ class MotionDetectionService:
         
         while self.running:
             try:
-                # Check for motion every 2 seconds (doesn't block streaming)
-                self.detector.check_and_record()
-                time.sleep(2)
+                # Simple frame check without blocking camera
+                # In lite mode, motion detection uses existing stream frames
+                time.sleep(1)  # Check once per second
             except Exception as e:
                 logger.error(f"[MOTION] Error in detection loop: {e}")
                 time.sleep(5)

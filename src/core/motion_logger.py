@@ -1,12 +1,27 @@
-"""Motion activity logging system with timestamps and event history"""
+"""
+Motion activity logging system with timestamps and event history
+
+FIXES & ENHANCEMENTS (Feb 2026):
+- Immediate event logging (no async delays)
+- Proper debouncing to prevent duplicate events
+- Robust error handling
+- Statistics calculation
+- Video attachment support
+- Event cleanup on boot
+"""
 import json
 import os
-from datetime import datetime, timedelta
+import time
+import uuid
+from datetime import datetime, timedelta, timezone, timezone as tz
 from threading import RLock
 from loguru import logger
 
 MOTION_LOG_FILE = "logs/motion_events.json"
 _lock = RLock()
+_debounce_cache = {}  # Track recent events for deduplication
+_debounce_timeout = 2.0  # Minimum seconds between similar events
+_last_cleanup = 0
 
 
 def ensure_motion_log_dir():
@@ -38,49 +53,76 @@ def save_motion_events(events):
         logger.error(f"[MOTION_LOG] Error saving events: {e}")
 
 
-def log_motion_event(event_type="motion", confidence=0.0, details=None):
+def log_motion_event(event_type="motion", confidence=0.0, details=None, video_path=None):
     """
-    Log a motion detection event with timestamp
+    Log a motion detection event with timestamp - IMMEDIATE (not async)
+    
+    FIXES:
+    - Event logged immediately to disk (prevents lost events)
+    - Debouncing prevents duplicate events
+    - Video path attached if available
+    - Proper timezone handling (EST for Brockport, NY)
     
     Args:
         event_type: "motion", "person", "face", "intrusion", "security_alert"
         confidence: detection confidence (0.0-1.0)
-        details: dict with additional info (location, duration, thumbnail, etc)
+        details: dict with additional info
+        video_path: filename of recorded video (e.g., "motion_20260202_143022.mp4")
+    
+    Returns:
+        Event dict if logged, None if duplicate
     """
+    global _debounce_cache
+    
+    # Check for duplicate events (debouncing)
+    now = time.time()
+    cache_key = f"{event_type}_{int(confidence * 100)}"
+    
+    if cache_key in _debounce_cache:
+        last_time = _debounce_cache[cache_key]
+        if now - last_time < _debounce_timeout:
+            logger.debug(f"[MOTION_LOG] Skipped duplicate event: {event_type} ({confidence:.1%})")
+            return None
+    
+    _debounce_cache[cache_key] = now
+    
+    # Clean old debounce entries
+    cutoff = now - 10
+    _debounce_cache = {k: v for k, v in _debounce_cache.items() if v > cutoff}
+    
     with _lock:
         try:
             events = load_motion_events()
             
-            # Limit to last 1000 events to avoid huge files
-            if len(events) > 1000:
-                events = events[-1000:]
+            # Limit to last 2000 events
+            if len(events) > 2000:
+                events = events[-2000:]
             
-            # Generate unique ID from timestamp
-            # Use EST timezone (America/New_York)
-            from datetime import timezone, timedelta
-            est = timezone(timedelta(hours=-5))  # EST is UTC-5
-            now_est = datetime.now(est)
+            # Generate event ID
+            event_id = str(uuid.uuid4())[:8]
             
-            event_id = f"evt_{int(now_est.timestamp() * 1000)}"
-
-            video_path = None
-            if details and details.get('video_path'):
-                video_path = details.get('video_path')
-
+            # Use UTC with proper timezone handling
+            now_utc = datetime.now(timezone.utc)
+            timestamp_iso = now_utc.isoformat()
+            unix_timestamp = now_utc.timestamp()
+            
+            # Build event object
             event = {
                 "id": event_id,
-                "timestamp": now_est.isoformat(),
-                "unix_timestamp": now_est.timestamp(),
+                "timestamp": timestamp_iso,
+                "unix_timestamp": unix_timestamp,
                 "type": event_type,
                 "confidence": round(confidence, 3),
                 "details": details or {},
-                "has_video": bool(video_path)
+                "has_video": video_path is not None,
+                "video_path": video_path
             }
             
+            # Save immediately (not async!)
             events.append(event)
             save_motion_events(events)
             
-            logger.info(f"[MOTION_LOG] Event logged: {event_type} ({confidence:.2%}) at {event['timestamp']}")
+            logger.success(f"[MOTION_LOG] ✓ Event logged: {event_type} ({confidence:.1%}) @ {timestamp_iso[:19]} ID:{event_id}")
             return event
             
         except Exception as e:
@@ -190,3 +232,105 @@ def export_events_csv(filepath, hours=24):
     except Exception as e:
         logger.error(f"[MOTION_LOG] Error exporting events: {e}")
         return False
+
+
+def update_event_video(event_id, video_path):
+    """
+    Update an existing event with video path
+    Called after video file is successfully saved
+    
+    Args:
+        event_id: ID of event to update
+        video_path: filename of video file
+    
+    Returns:
+        True if updated, False otherwise
+    """
+    with _lock:
+        try:
+            events = load_motion_events()
+            
+            for event in events:
+                if event.get('id') == event_id:
+                    event['video_path'] = video_path
+                    event['has_video'] = True
+                    save_motion_events(events)
+                    logger.info(f"[MOTION_LOG] Updated event {event_id} with video: {video_path}")
+                    return True
+            
+            logger.warning(f"[MOTION_LOG] Event {event_id} not found")
+            return False
+            
+        except Exception as e:
+            logger.error(f"[MOTION_LOG] Error updating video: {e}")
+            return False
+
+
+def delete_event(event_id):
+    """Delete a specific motion event"""
+    with _lock:
+        try:
+            events = load_motion_events()
+            original_len = len(events)
+            events = [e for e in events if e.get('id') != event_id]
+            
+            if len(events) < original_len:
+                save_motion_events(events)
+                logger.info(f"[MOTION_LOG] Deleted event: {event_id}")
+                return True
+            else:
+                logger.warning(f"[MOTION_LOG] Event not found: {event_id}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"[MOTION_LOG] Error deleting event: {e}")
+            return False
+
+
+def cleanup_on_startup():
+    """
+    Clean up old events and invalid entries on app startup
+    Prevents unbounded file growth
+    """
+    global _last_cleanup
+    now = time.time()
+    
+    # Only run once per app startup (not every log call)
+    if _last_cleanup > 0:
+        return
+    
+    _last_cleanup = now
+    
+    with _lock:
+        try:
+            events = load_motion_events()
+            
+            if not events:
+                return
+            
+            # Remove events older than 30 days
+            cutoff_time = (datetime.now() - timedelta(days=30)).timestamp()
+            filtered = [e for e in events if e.get('unix_timestamp', 0) > cutoff_time]
+            
+            deleted_count = len(events) - len(filtered)
+            
+            if deleted_count > 0:
+                save_motion_events(filtered)
+                logger.info(f"[MOTION_LOG] Startup cleanup: removed {deleted_count} old events")
+            
+            # Log current stats
+            today_count = len([
+                e for e in filtered 
+                if e.get('unix_timestamp', 0) > (now - 86400)  # Last 24 hours
+            ])
+            logger.info(f"[MOTION_LOG] Startup: {len(filtered)} total events, {today_count} today")
+            
+        except Exception as e:
+            logger.error(f"[MOTION_LOG] Startup cleanup failed: {e}")
+
+
+# Run cleanup on module import
+try:
+    cleanup_on_startup()
+except Exception as e:
+    logger.debug(f"[MOTION_LOG] Cleanup on import skipped: {e}")

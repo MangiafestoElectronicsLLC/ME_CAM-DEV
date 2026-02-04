@@ -243,11 +243,11 @@ def create_lite_app(pi_model, camera_config):
             from src.camera import RpicamStreamer, is_rpicam_available
             
             if is_rpicam_available():
-                logger.info("[CAMERA] Attempting rpicam-jpeg streaming...")
-                camera = RpicamStreamer(width=640, height=480, fps=15)
+                logger.info("[CAMERA] Attempting rpicam-jpeg streaming (OPTIMIZED)...")
+                camera = RpicamStreamer(width=640, height=480, fps=30, quality=70)
                 if camera.start():
                     camera_available = True
-                    logger.success(f"[CAMERA] RPiCam initialized: 640x480 @ 15 FPS")
+                    logger.success(f"[CAMERA] RPiCam initialized (OPTIMIZED): 640x480 @ 30 FPS, Quality 70")
             else:
                 logger.warning("[CAMERA] rpicam-jpeg not available, falling back to picamera2...")
                 from picamera2 import Picamera2
@@ -550,6 +550,12 @@ def create_lite_app(pi_model, camera_config):
         
         cfg = get_config()
         storage = get_storage_info()
+        try:
+            total_gb = storage.get('total_gb', 0) or 0
+            used_gb = storage.get('used_gb', 0) or 0
+            storage_percent = int((used_gb / total_gb) * 100) if total_gb > 0 else 0
+        except Exception:
+            storage_percent = 0
         battery_status = battery.get_status()
         motion_events = get_motion_events()
         
@@ -561,8 +567,9 @@ def create_lite_app(pi_model, camera_config):
             camera_available=camera is not None,
             battery_pct=battery_status.get('percent', 0),
             storage=storage,
+            storage_percent=storage_percent,
             motion_count=len(motion_events),
-            version='2.1-LITE'
+            version='2.2.3-LITE'
         )
     
     @app.route("/login", methods=["GET", "POST"])

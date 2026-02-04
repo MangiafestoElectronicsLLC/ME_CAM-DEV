@@ -20,11 +20,12 @@ import signal
 class RpicamStreamer:
     """Stream camera via rpicam-jpeg subprocess - persistent connection"""
     
-    def __init__(self, width=640, height=480, fps=15, timeout=5):
+    def __init__(self, width=640, height=480, fps=15, timeout=5, quality=85):
         self.width = width
         self.height = height
         self.fps = fps
         self.timeout = timeout
+        self.quality = quality
         self.running = False
         self.process = None
         self.last_frame = None
@@ -126,9 +127,8 @@ class RpicamStreamer:
                 '-t', '100',  # Timeout 100ms (quick capture)
                 '-o', '-',  # Output to stdout
                 '--nopreview',
-                '--quality', '85',
-                '--hflip',  # Horizontal flip
-                '--vflip',  # Vertical flip (same as 180 rotation)
+                '--quality', str(self.quality),
+                '--vflip',  # Arducam V3 mounted upside down
             ]
             
             result = subprocess.run(

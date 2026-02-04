@@ -1,11 +1,18 @@
 """
-Pi Model Detection and Camera Adaptation
-Detects Raspberry Pi model and adapts camera initialization accordingly
+Pi Model Detection and Camera Adaptation - ENHANCED Feb 2026
+Detects Raspberry Pi model, camera type, and auto-configures optimal settings
+
+Improvements:
+- Pi 5 detection and optimization
+- Camera type detection (IMX519, OV5647, etc.)
+- Rotation/flip auto-detection
+- Hardware capability mapping
 """
 import subprocess
 import os
 import re
 from loguru import logger
+from typing import Dict, Optional
 
 def get_pi_model():
     """
@@ -185,3 +192,203 @@ def get_pi_info():
     if _pi_model is None:
         init_pi_detection()
     return _pi_model, _camera_config
+
+def detect_camera_type() -> Optional[Dict]:
+    """
+    Detect connected camera module and its type
+    
+    Returns:
+        Dict with camera info or None if no camera detected
+    
+    Detects:
+    - IMX519 (Arducam 16MP)
+    - OV5647 (Pi Camera v1)
+    - IMX219 (Pi Camera v2)
+    - IMX477 (Pi Camera v2 HQ)
+    - And others via libcamera
+    """
+    try:
+        import subprocess
+        
+        # Try libcamera-hello to detect camera
+        result = subprocess.run(
+            ['libcamera-hello', '--list-cameras'],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        
+        output = result.stdout + result.stderr
+        
+        if 'imx519' in output.lower():
+            logger.success("[CAMERA_DETECT] ✓ Found IMX519 (Arducam 16MP)")
+            return {
+                'type': 'IMX519',
+                'name': 'Arducam IMX519',
+                'megapixels': 16,
+                'max_fps': 20,
+                'modes': ['photo', 'video'],
+                'needs_overlay': 'imx519'
+            }
+        elif 'ov5647' in output.lower():
+            logger.success("[CAMERA_DETECT] ✓ Found OV5647 (Pi Camera v1)")
+            return {
+                'type': 'OV5647',
+                'name': 'Raspberry Pi Camera v1',
+                'megapixels': 5,
+                'max_fps': 90,
+                'modes': ['photo', 'video'],
+                'legacy': True
+            }
+        elif 'imx219' in output.lower():
+            logger.success("[CAMERA_DETECT] ✓ Found IMX219 (Pi Camera v2)")
+            return {
+                'type': 'IMX219',
+                'name': 'Raspberry Pi Camera v2',
+                'megapixels': 8,
+                'max_fps': 60,
+                'modes': ['photo', 'video']
+            }
+        elif 'imx477' in output.lower():
+            logger.success("[CAMERA_DETECT] ✓ Found IMX477 (Pi Camera v2 HQ)")
+            return {
+                'type': 'IMX477',
+                'name': 'Raspberry Pi Camera v2 HQ',
+                'megapixels': 12.3,
+                'max_fps': 50,
+                'modes': ['photo', 'video']
+            }
+        elif 'imx708' in output.lower():
+            logger.success("[CAMERA_DETECT] ✓ Found IMX708 (Pi Camera 3)")
+            return {
+                'type': 'IMX708',
+                'name': 'Raspberry Pi Camera 3',
+                'megapixels': 12.3,
+                'max_fps': 120,
+                'modes': ['photo', 'video', 'ir']
+            }
+        elif len(output) > 0 and 'Camera' in output:
+            logger.info(f"[CAMERA_DETECT] Found camera: {output[:100]}")
+            return {
+                'type': 'Unknown',
+                'name': 'Unknown camera',
+                'megapixels': 0,
+                'max_fps': 15,
+                'modes': ['video']
+            }
+        else:
+            logger.warning("[CAMERA_DETECT] No camera detected via libcamera")
+            return None
+            
+    except subprocess.TimeoutExpired:
+        logger.warning("[CAMERA_DETECT] libcamera-hello timeout")
+        return None
+    except FileNotFoundError:
+        logger.warning("[CAMERA_DETECT] libcamera not installed")
+        return None
+    except Exception as e:
+        logger.warning(f"[CAMERA_DETECT] Camera detection failed: {e}")
+        return None
+
+
+def detect_camera_rotation() -> Optional[str]:
+    """
+    Auto-detect if camera needs rotation/flip
+    
+    Checks:
+    1. IMX519 on Pi Zero 2W (usually upside down)
+    2. Check device orientation from /boot/config.txt
+    
+    Returns:
+        'normal', 'rotate_90', 'rotate_180', 'rotate_270', or None
+    """
+    try:
+        camera_info = detect_camera_type()
+        if not camera_info:
+            return None
+        
+        camera_type = camera_info.get('type', '')
+        
+        # IMX519 on Pi Zero 2W is typically upside down (180 rotation)
+        if camera_type == 'IMX519':
+            pi_model_info = get_pi_model()
+            if 'Zero' in pi_model_info.get('name', ''):
+                logger.info("[CAMERA_DETECT] IMX519 on Pi Zero detected - applying 180° rotation")
+                return 'rotate_180'
+        
+        # Check /boot/firmware/config.txt for overlay rotation
+        config_paths = [
+            '/boot/firmware/config.txt',
+            '/boot/config.txt'
+        ]
+        
+        for config_path in config_paths:
+            if os.path.exists(config_path):
+                try:
+                    with open(config_path, 'r') as f:
+                        content = f.read()
+                        
+                    if 'dtparam=rotate=1' in content:
+                        return 'rotate_90'
+                    elif 'dtparam=rotate=2' in content:
+                        return 'rotate_180'
+                    elif 'dtparam=rotate=3' in content:
+                        return 'rotate_270'
+                    elif 'dtparam=flip_horizontal=1' in content:
+                        return 'flip_horizontal'
+                    elif 'dtparam=flip_vertical=1' in content:
+                        return 'flip_vertical'
+                except:
+                    pass
+        
+        return None
+        
+    except Exception as e:
+        logger.warning(f"[CAMERA_DETECT] Rotation detection failed: {e}")
+        return None
+
+
+def get_device_uuid() -> str:
+    """
+    Get unique device UUID based on CPU serial
+    Used for cloud device identification
+    """
+    try:
+        with open('/proc/cpuinfo', 'r') as f:
+            cpuinfo = f.read()
+        
+        # Extract serial
+        serial_match = re.search(r'Serial\s+:\s+([0-9a-f]+)', cpuinfo)
+        if serial_match:
+            serial = serial_match.group(1)
+            # Create UUID-like identifier
+            return f"mecam-{serial[-8:]}"
+        
+        # Fallback to hostname
+        import socket
+        hostname = socket.gethostname()
+        return f"mecam-{hostname}"
+        
+    except Exception as e:
+        logger.warning(f"[DEVICE_UUID] Failed to get UUID: {e}")
+        return "mecam-unknown"
+
+
+def get_full_system_info() -> Dict:
+    """Get comprehensive system information for setup"""
+    try:
+        pi_model = get_pi_model()
+        camera_type = detect_camera_type()
+        camera_rotation = detect_camera_rotation()
+        device_uuid = get_device_uuid()
+        
+        return {
+            'pi_model': pi_model,
+            'camera_type': camera_type,
+            'camera_rotation': camera_rotation,
+            'device_uuid': device_uuid,
+            'detected_at': datetime.now().isoformat() if 'datetime' in dir() else None
+        }
+    except Exception as e:
+        logger.error(f"[SYSTEM_INFO] Failed to get system info: {e}")
+        return {}
