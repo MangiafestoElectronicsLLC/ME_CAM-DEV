@@ -79,8 +79,7 @@
         aspect-ratio: 4/3;
         object-fit: contain;
         max-height: 80vh;
-        transform: rotate(180deg);
-        /* CSS rotation to fix upside-down camera */
+        /* Camera orientation fixed in rpicam_streamer.py (removed vflip) */
     }
 
     .info-card h3 {

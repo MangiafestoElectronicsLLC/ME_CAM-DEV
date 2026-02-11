@@ -1,13 +1,17 @@
 # =========================================================================
-# ME_CAM Python Requirements - Clean Version
+# ME_CAM Python Requirements - v3.0 Professional Edition
 # =========================================================================
 
-# Core
+# Core Web Framework
 Flask==3.0.0
 Werkzeug==3.0.0
 
-# Encryption
-cryptography==41.0.0
+# Remote Access (NEW v3.0)
+aiortc>=1.5.0            # WebRTC peer connections
+av>=11.0.0               # Audio/Video processing for WebRTC
+
+# Encryption & Security
+cryptography==42.0.0
 
 # QR Codes
 qrcode[pil]==7.4.2
@@ -15,16 +19,35 @@ qrcode[pil]==7.4.2
 # System utilities
 psutil==5.9.5
 
-# Email + Cloud
+# Email + Cloud Storage
 yagmail==0.15.293
 pydrive2==1.19.0
+boto3>=1.28.0            # AWS S3 integration (NEW v3.0)
+google-cloud-storage>=2.10.0  # Google Cloud Storage (NEW v3.0)
+
+# Push Notifications (NEW v2.2.4)
+pywebpush==1.14.0        # Web push notifications
+py-vapid==1.9.0          # VAPID authentication for web push
+firebase-admin==6.3.0    # Firebase Cloud Messaging
 
 # Logging helpers
 loguru==0.7.2
 
-# Note: OpenCV is installed via system package (python3-opencv)
-# to avoid NumPy 2.x compatibility issues on Pi Zero 2W
-# Use venv with --system-site-packages to access it
+# Async HTTP
+aiohttp>=3.9.0           # For async cloud uploads
 
-# Note: tflite-runtime requires specific builds
-# Install manually if needed for advanced features
+# =========================================================================
+# System Packages (NOT via pip)
+# =========================================================================
+# python3-opencv         - via: sudo apt install python3-opencv
+# tflite-runtime         - via: pip install tflite-runtime==2.11.0
+#
+# Note: Use venv with --system-site-packages to access system OpenCV
+# This avoids NumPy 2.x compatibility issues on Pi Zero 2W
+
+# =========================================================================
+# Optional AI/ML Packages (install only if needed)
+# =========================================================================
+# tensorflow-lite-runtime==2.11.0  # Edge AI detection (OPTIONAL)
+# firebase-admin>=6.0.0            # Push notifications (OPTIONAL)
+# opencv-python-headless>=4.8.0    # If not using system OpenCV (NOT RECOMMENDED)

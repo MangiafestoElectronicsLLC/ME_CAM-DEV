@@ -1,0 +1,8 @@
+# SAFE IMX519 BOOT CONFIG
+# Add this to the END of /boot/firmware/config.txt
+
+# IMX519 Camera Configuration (February 5, 2026)
+camera_auto_detect=0
+dtoverlay=imx519
+gpu_mem=128
+dtparam=i2c_arm=on

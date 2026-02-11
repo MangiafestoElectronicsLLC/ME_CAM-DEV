@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cloud Storage Settings - ME_CAM</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        .cloud-settings {
+            max-width: 800px;
+            margin: 20px auto;
+            padding: 20px;
+        }
+
+        .setting-group {
+            background: #f5f5f5;
+            padding: 15px;
+            margin-bottom: 15px;
+            border-radius: 8px;
+            border: 1px solid #ddd;
+        }
+
+        .setting-group h3 {
+            margin-top: 0;
+            color: #333;
+            font-size: 18px;
+        }
+
+        .setting-row {
+            margin: 10px 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .setting-row label {
+            font-weight: 500;
+            color: #555;
+        }
+
+        .setting-row input,
+        .setting-row select {
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            width: 200px;
+        }
+
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 50px;
+            height: 24px;
+        }
+
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 24px;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+
+        input:checked+.slider {
+            background-color: #4CAF50;
+        }
+
+        input:checked+.slider:before {
+            transform: translateX(26px);
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .status-connected {
+            background: #4CAF50;
+            color: white;
+        }
+
+        .status-disconnected {
+            background: #f44336;
+            color: white;
+        }
+
+        .status-pending {
+            background: #FF9800;
+            color: white;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: background 0.3s;
+        }
+
+        .btn-primary {
+            background: #2196F3;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #0b7dda;
+        }
+
+        .btn-success {
+            background: #4CAF50;
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: #45a049;
+        }
+
+        .btn-danger {
+            background: #f44336;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #da190b;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+            border: 1px solid #ddd;
+        }
+
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #2196F3;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: #777;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="cloud-settings">
+        <h1>☁️ Cloud Storage Settings</h1>
+
+        <!-- Enable/Disable Cloud Storage -->
+        <div class="setting-group">
+            <h3>Cloud Storage Status</h3>
+            <div class="setting-row">
+                <label>Enable Cloud Backup</label>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="cloud-enabled" onchange="toggleCloudStorage()">
+                    <span class="slider"></span>
+                </label>
+            </div>
+            <div class="setting-row">
+                <label>Connection Status</label>
+                <span id="cloud-status" class="status-badge status-disconnected">Disconnected</span>
+            </div>
+        </div>
+
+        <!-- Google Drive Configuration -->
+        <div class="setting-group">
+            <h3>Google Drive Configuration</h3>
+            <div class="setting-row">
+                <label>OAuth Status</label>
+                <span id="oauth-status" class="status-badge status-pending">Not Authenticated</span>
+            </div>
+            <div class="setting-row">
+                <button class="btn btn-primary" onclick="authenticateGoogleDrive()">Authenticate Google Drive</button>
+                <button class="btn btn-danger" onclick="disconnectGoogleDrive()">Disconnect</button>
+            </div>
+            <div class="setting-row">
+                <label>Upload Folder</label>
+                <input type="text" id="upload-folder" value="MECAM_Recordings" placeholder="Folder name">
+            </div>
+        </div>
+
+        <!-- Upload Settings -->
+        <div class="setting-group">
+            <h3>Upload Settings</h3>
+            <div class="setting-row">
+                <label>Upload Schedule</label>
+                <select id="upload-schedule">
+                    <option value="immediate">Immediate</option>
+                    <option value="hourly">Every Hour</option>
+                    <option value="daily">Daily (2 AM)</option>
+                    <option value="manual">Manual Only</option>
+                </select>
+            </div>
+            <div class="setting-row">
+                <label>Enable Compression</label>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="compression-enabled" checked>
+                    <span class="slider"></span>
+                </label>
+            </div>
+            <div class="setting-row">
+                <label>Enable Encryption</label>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="encryption-enabled" checked>
+                    <span class="slider"></span>
+                </label>
+            </div>
+            <div class="setting-row">
+                <label>Max Upload Speed (Mbps)</label>
+                <input type="number" id="max-bandwidth" value="10" min="1" max="100" step="0.5">
+            </div>
+        </div>
+
+        <!-- Retention Policy -->
+        <div class="setting-group">
+            <h3>Retention Policy</h3>
+            <div class="setting-row">
+                <label>Local Storage (days)</label>
+                <input type="number" id="local-retention" value="7" min="1" max="90">
+            </div>
+            <div class="setting-row">
+                <label>Cloud Storage (days)</label>
+                <select id="cloud-retention">
+                    <option value="30">30 Days</option>
+                    <option value="60">60 Days</option>
+                    <option value="90">90 Days</option>
+                    <option value="180">6 Months</option>
+                    <option value="365">1 Year</option>
+                    <option value="0">Forever</option>
+                </select>
+            </div>
+            <div class="setting-row">
+                <label>Auto-delete after upload</label>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="auto-delete" checked>
+                    <span class="slider"></span>
+                </label>
+            </div>
+        </div>
+
+        <!-- Upload Statistics -->
+        <div class="setting-group">
+            <h3>Upload Statistics</h3>
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-value" id="stat-uploaded">0</div>
+                    <div class="stat-label">Files Uploaded</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="stat-bytes">0 MB</div>
+                    <div class="stat-label">Total Data</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="stat-queue">0</div>
+                    <div class="stat-label">Queue Size</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="stat-failed">0</div>
+                    <div class="stat-label">Failed Uploads</div>
+                </div>
+            </div>
+            <div class="setting-row" style="margin-top: 15px;">
+                <label>Last Upload</label>
+                <span id="last-upload">Never</span>
+            </div>
+        </div>
+
+        <!-- Actions -->
+        <div class="setting-group">
+            <h3>Actions</h3>
+            <button class="btn btn-success" onclick="saveSettings()">💾 Save Settings</button>
+            <button class="btn btn-primary" onclick="testUpload()">🧪 Test Upload</button>
+            <button class="btn btn-primary" onclick="refreshStats()">🔄 Refresh Stats</button>
+            <button class="btn btn-danger" onclick="clearQueue()">🗑️ Clear Upload Queue</button>
+        </div>
+    </div>
+
+    <script>
+        // Load settings on page load
+        window.addEventListener('DOMContentLoaded', () => {
+            loadSettings();
+            refreshStats();
+            setInterval(refreshStats, 30000); // Refresh every 30 seconds
+        });
+
+        function loadSettings() {
+            fetch('/api/cloud/settings')
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('cloud-enabled').checked = data.enabled || false;
+                    document.getElementById('compression-enabled').checked = data.compression !== false;
+                    document.getElementById('encryption-enabled').checked = data.encryption !== false;
+                    document.getElementById('upload-folder').value = data.folder || 'MECAM_Recordings';
+                    document.getElementById('upload-schedule').value = data.schedule || 'immediate';
+                    document.getElementById('max-bandwidth').value = data.max_bandwidth || 10;
+                    document.getElementById('local-retention').value = data.local_retention || 7;
+                    document.getElementById('cloud-retention').value = data.cloud_retention || 30;
+                    document.getElementById('auto-delete').checked = data.auto_delete !== false;
+
+                    updateStatus(data.drive_enabled);
+                })
+                .catch(error => {
+                    console.error('Failed to load settings:', error);
+                });
+        }
+
+        function saveSettings() {
+            const settings = {
+                enabled: document.getElementById('cloud-enabled').checked,
+                compression: document.getElementById('compression-enabled').checked,
+                encryption: document.getElementById('encryption-enabled').checked,
+                folder: document.getElementById('upload-folder').value,
+                schedule: document.getElementById('upload-schedule').value,
+                max_bandwidth: parseFloat(document.getElementById('max-bandwidth').value),
+                local_retention: parseInt(document.getElementById('local-retention').value),
+                cloud_retention: parseInt(document.getElementById('cloud-retention').value),
+                auto_delete: document.getElementById('auto-delete').checked
+            };
+
+            fetch('/api/cloud/settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(settings)
+            })
+                .then(response => response.json())
+                .then(data => {
+                    alert(data.success ? '✅ Settings saved!' : '❌ Failed to save settings');
+                })
+                .catch(error => {
+                    alert('❌ Error: ' + error.message);
+                });
+        }
+
+        function toggleCloudStorage() {
+            const enabled = document.getElementById('cloud-enabled').checked;
+            fetch('/api/cloud/toggle', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ enabled })
+            })
+                .then(response => response.json())
+                .then(data => {
+                    updateStatus(data.enabled);
+                });
+        }
+
+        function authenticateGoogleDrive() {
+            window.open('/api/cloud/oauth/authorize', 'Google Drive Auth', 'width=600,height=700');
+            // Poll for OAuth completion
+            const checkAuth = setInterval(() => {
+                fetch('/api/cloud/oauth/status')
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.authenticated) {
+                            clearInterval(checkAuth);
+                            alert('✅ Google Drive authenticated successfully!');
+                            loadSettings();
+                        }
+                    });
+            }, 2000);
+        }
+
+        function disconnectGoogleDrive() {
+            if (confirm('Are you sure you want to disconnect Google Drive?')) {
+                fetch('/api/cloud/oauth/disconnect', { method: 'POST' })
+                    .then(response => response.json())
+                    .then(data => {
+                        alert('✅ Google Drive disconnected');
+                        loadSettings();
+                    });
+            }
+        }
+
+        function refreshStats() {
+            fetch('/api/cloud/stats')
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('stat-uploaded').textContent = data.total_uploaded || 0;
+                    document.getElementById('stat-bytes').textContent = formatBytes(data.total_bytes || 0);
+                    document.getElementById('stat-queue').textContent = data.queue_size || 0;
+                    document.getElementById('stat-failed').textContent = data.total_failed || 0;
+                    document.getElementById('last-upload').textContent = data.last_upload ?
+                        new Date(data.last_upload).toLocaleString() : 'Never';
+                });
+        }
+
+        function testUpload() {
+            if (!confirm('Create a test file and upload to Google Drive?')) return;
+
+            fetch('/api/cloud/test_upload', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        alert('✅ Test upload successful!\nFile ID: ' + data.file_id);
+                        refreshStats();
+                    } else {
+                        alert('❌ Test upload failed: ' + data.error);
+                    }
+                })
+                .catch(error => {
+                    alert('❌ Error: ' + error.message);
+                });
+        }
+
+        function clearQueue() {
+            if (!confirm('Clear all pending uploads from queue?')) return;
+
+            fetch('/api/cloud/clear_queue', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    alert('✅ Queue cleared');
+                    refreshStats();
+                });
+        }
+
+        function updateStatus(enabled) {
+            const statusBadge = document.getElementById('cloud-status');
+            const oauthBadge = document.getElementById('oauth-status');
+
+            if (enabled) {
+                statusBadge.className = 'status-badge status-connected';
+                statusBadge.textContent = 'Connected';
+                oauthBadge.className = 'status-badge status-connected';
+                oauthBadge.textContent = 'Authenticated';
+            } else {
+                statusBadge.className = 'status-badge status-disconnected';
+                statusBadge.textContent = 'Disconnected';
+                oauthBadge.className = 'status-badge status-pending';
+                oauthBadge.textContent = 'Not Authenticated';
+            }
+        }
+
+        function formatBytes(bytes) {
+            if (bytes === 0) return '0 MB';
+            const mb = bytes / 1024 / 1024;
+            if (mb < 1) return (mb * 1024).toFixed(1) + ' KB';
+            if (mb < 1024) return mb.toFixed(1) + ' MB';
+            return (mb / 1024).toFixed(2) + ' GB';
+        }
+    </script>
+</body>
+
+</html>

@@ -10,7 +10,6 @@ Lightweight Flask App for Pi Zero 2W - COMPLETE VERSION
 """
 
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify, Response, send_file
-from flask_cors import CORS
 from loguru import logger
 import os
 import sys
@@ -20,8 +19,6 @@ import time
 import threading
 import json
 import shutil
-import asyncio
-from functools import wraps
 
 # Add src directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'src'))
@@ -31,31 +28,6 @@ from src.core import (
     authenticate, BatteryMonitor, log_motion_event, get_recent_events,
     get_event_statistics
 )
-
-# v3.0 modules
-try:
-    from src.streaming.webrtc_peer import WebRTCStreamer
-    WEBRTC_AVAILABLE = True
-    logger.info("[V3] WebRTC module loaded successfully")
-except ImportError as e:
-    WEBRTC_AVAILABLE = False
-    logger.warning(f"[V3] WebRTC not available: {e}")
-
-try:
-    from src.detection.tflite_detector import SmartMotionDetector, DetectionTracker
-    AI_DETECTION_AVAILABLE = True
-    logger.info("[V3] AI detection module loaded successfully")
-except ImportError as e:
-    AI_DETECTION_AVAILABLE = False
-    logger.warning(f"[V3] AI detection not available: {e}")
-
-try:
-    from src.networking.remote_access import TailscaleHelper, CloudflareHelper
-    REMOTE_ACCESS_AVAILABLE = True
-    logger.info("[V3] Remote access helpers loaded successfully")
-except ImportError as e:
-    REMOTE_ACCESS_AVAILABLE = False
-    logger.warning(f"[V3] Remote access not available: {e}")
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -218,23 +190,17 @@ def create_lite_app(pi_model, camera_config):
     # VPN SUPPORT: Add CORS and security headers for VPN connections
     @app.after_request
     def add_vpn_headers(response):
-        """Add headers for VPN and remote access support from ANY network"""
-        # Allow requests from any origin (different WiFi, cellular, VPN clients)
-        origin = request.headers.get('Origin', '*')
-        response.headers['Access-Control-Allow-Origin'] = origin
-        response.headers['Access-Control-Allow-Credentials'] = 'true'
+        """Add headers for VPN and remote access support"""
+        # Allow requests from any origin (VPN clients)
+        response.headers['Access-Control-Allow-Origin'] = '*'
         response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
-        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
         response.headers['Access-Control-Max-Age'] = '3600'
-        response.headers['Access-Control-Expose-Headers'] = 'Content-Type'
         
-        # Disable buffering for streaming over VPN/remote connections
-        response.headers['X-Accel-Buffering'] = 'no'
-        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
-        response.headers['Pragma'] = 'no-cache'
-        response.headers['Expires'] = '0'
+        # Tell browser/clients that HTTP is not required
+        response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
         
-        # Security headers (but allow VPN/remote access)
+        # Allow connection from VPN clients that might have different IPs
         response.headers['X-Frame-Options'] = 'SAMEORIGIN'
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['X-XSS-Protection'] = '1; mode=block'
@@ -277,11 +243,11 @@ def create_lite_app(pi_model, camera_config):
             from src.camera import RpicamStreamer, is_rpicam_available
             
             if is_rpicam_available():
-                logger.info("[CAMERA] Attempting rpicam-jpeg streaming (OPTIMIZED)...")
-                camera = RpicamStreamer(width=640, height=480, fps=30, quality=95)
+                logger.info("[CAMERA] Attempting rpicam-jpeg streaming...")
+                camera = RpicamStreamer(width=640, height=480, fps=15)
                 if camera.start():
                     camera_available = True
-                    logger.success(f"[CAMERA] RPiCam initialized (OPTIMIZED): 640x480 @ 30 FPS, Quality 95")
+                    logger.success(f"[CAMERA] RPiCam initialized: 640x480 @ 15 FPS")
             else:
                 logger.warning("[CAMERA] rpicam-jpeg not available, falling back to picamera2...")
                 from picamera2 import Picamera2
@@ -584,12 +550,6 @@ def create_lite_app(pi_model, camera_config):
         
         cfg = get_config()
         storage = get_storage_info()
-        try:
-            total_gb = storage.get('total_gb', 0) or 0
-            used_gb = storage.get('used_gb', 0) or 0
-            storage_percent = int((used_gb / total_gb) * 100) if total_gb > 0 else 0
-        except Exception:
-            storage_percent = 0
         battery_status = battery.get_status()
         motion_events = get_motion_events()
         
@@ -601,9 +561,8 @@ def create_lite_app(pi_model, camera_config):
             camera_available=camera is not None,
             battery_pct=battery_status.get('percent', 0),
             storage=storage,
-            storage_percent=storage_percent,
             motion_count=len(motion_events),
-            version='2.2.3-LITE'
+            version='2.1-LITE'
         )
     
     @app.route("/login", methods=["GET", "POST"])
@@ -1734,135 +1693,6 @@ network={{
             
             time.sleep(0.1)
     
-    # ============= V3.0 WEBRTC ROUTES =============
-    
-    @app.route("/api/webrtc/offer", methods=["POST"])
-    def api_webrtc_offer():
-        """Handle WebRTC offer from client"""
-        if not WEBRTC_AVAILABLE:
-            return jsonify({'error': 'WebRTC not available'}), 503
-        
-        if 'user' not in session:
-            return jsonify({'error': 'Authentication required'}), 401
-        
-        try:
-            data = request.get_json()
-            if not data or 'sdp' not in data or 'type' not in data:
-                return jsonify({'error': 'Invalid SDP offer'}), 400
-            
-            logger.info("[WebRTC] Received SDP offer from client")
-            
-            # Create answer (async operation)
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            answer = loop.run_until_complete(webrtc_streamer.handle_offer(data))
-            loop.close()
-            
-            logger.success("[WebRTC] SDP answer created")
-            return jsonify(answer)
-            
-        except Exception as e:
-            logger.error(f"[WebRTC] Offer handling failed: {e}")
-            return jsonify({'error': str(e)}), 500
-    
-    @app.route("/api/webrtc/ice", methods=["POST"])
-    def api_webrtc_ice():
-        """Handle ICE candidate from client"""
-        if not WEBRTC_AVAILABLE:
-            return jsonify({'error': 'WebRTC not available'}), 503
-        
-        if 'user' not in session:
-            return jsonify({'error': 'Authentication required'}), 401
-        
-        try:
-            data = request.get_json()
-            if not data or 'candidate' not in data:
-                return jsonify({'error': 'Invalid ICE candidate'}), 400
-            
-            logger.debug("[WebRTC] Received ICE candidate from client")
-            # Add ICE candidate (implementation depends on WebRTC peer)
-            return jsonify({'ok': True})
-            
-        except Exception as e:
-            logger.error(f"[WebRTC] ICE handling failed: {e}")
-            return jsonify({'error': str(e)}), 500
-    
-    @app.route("/api/webrtc/status", methods=["GET"])
-    def api_webrtc_status():
-        """Get WebRTC connection status"""
-        return jsonify({
-            'available': WEBRTC_AVAILABLE,
-            'connected': webrtc_streamer.pc.connectionState == 'connected' if webrtc_streamer else False,
-            'ice_state': webrtc_streamer.pc.iceConnectionState if webrtc_streamer else 'new'
-        })
-    
-    # ============= V3.0 REMOTE ACCESS ROUTES =============
-    
-    @app.route("/api/remote/tailscale/status", methods=["GET"])
-    def api_tailscale_status():
-        """Get Tailscale VPN status"""
-        if not REMOTE_ACCESS_AVAILABLE:
-            return jsonify({'error': 'Remote access not available'}), 503
-        
-        try:
-            helper = TailscaleHelper()
-            return jsonify({
-                'installed': helper.is_installed(),
-                'enabled': helper.is_enabled() if helper.is_installed() else False,
-                'ip': helper.get_tailscale_ip() if helper.is_installed() else None,
-                'status': helper.get_status() if helper.is_installed() else None
-            })
-        except Exception as e:
-            logger.error(f"[Tailscale] Status check failed: {e}")
-            return jsonify({'error': str(e)}), 500
-    
-    @app.route("/api/remote/cloudflare/status", methods=["GET"])
-    def api_cloudflare_status():
-        """Get Cloudflare tunnel status"""
-        if not REMOTE_ACCESS_AVAILABLE:
-            return jsonify({'error': 'Remote access not available'}), 503
-        
-        try:
-            helper = CloudflareHelper()
-            return jsonify({
-                'installed': helper.is_installed()
-            })
-        except Exception as e:
-            logger.error(f"[Cloudflare] Status check failed: {e}")
-            return jsonify({'error': str(e)}), 500
-    
-    @app.route("/api/remote/info", methods=["GET"])
-    def api_remote_info():
-        """Get remote access information"""
-        import socket
-        
-        info = {
-            'local_ip': None,
-            'tailscale_ip': None,
-            'webrtc_available': WEBRTC_AVAILABLE,
-            'vpn_compatible': True
-        }
-        
-        # Get local IP
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(("8.8.8.8", 80))
-            info['local_ip'] = s.getsockname()[0]
-            s.close()
-        except:
-            pass
-        
-        # Get Tailscale IP if available
-        if REMOTE_ACCESS_AVAILABLE:
-            try:
-                helper = TailscaleHelper()
-                if helper.is_installed():
-                    info['tailscale_ip'] = helper.get_tailscale_ip()
-            except:
-                pass
-        
-        return jsonify(info)
-    
     # ============= SYSTEM ROUTES =============
     
     @app.route("/api/system/reboot", methods=["POST"])
@@ -1880,128 +1710,5 @@ network={{
         except Exception as e:
             logger.error(f"[SYSTEM] Reboot failed: {e}")
             return jsonify({'ok': False, 'error': str(e)}), 500
-    
-    # ============= V3.0 REMOTE ACCESS & WEBRTC =============
-    
-    @app.route("/api/v3/status", methods=["GET"])
-    def api_v3_status():
-        """Check v3.0 feature availability"""
-        status = {
-            "version": "3.0",
-            "webrtc": False,
-            "ai_detection": False,
-            "remote_access": False
-        }
-        
-        # Check WebRTC
-        try:
-            from src.streaming.webrtc_peer import WebRTCStreamer
-            status["webrtc"] = True
-        except:
-            pass
-        
-        # Check AI detection
-        try:
-            from src.detection.tflite_detector import SmartMotionDetector
-            status["ai_detection"] = True
-        except:
-            pass
-        
-        # Check remote access
-        try:
-            from src.networking.remote_access import TailscaleHelper
-            status["remote_access"] = True
-        except:
-            pass
-        
-        return jsonify(status)
-    
-    @app.route("/api/remote/access-info", methods=["GET"])
-    def api_remote_access_info():
-        """Get information for remote access from different networks"""
-        import socket
-        
-        info = {
-            "local_ip": None,
-            "tailscale_ip": None,
-            "hostname": socket.gethostname(),
-            "vpn_ready": True,
-            "different_network_ready": True,
-            "ports": {
-                "http": 8080,
-                "https": 8443
-            },
-            "access_methods": [
-                "local_network",
-                "tailscale_vpn",
-                "port_forwarding",
-                "cloudflare_tunnel"
-            ]
-        }
-        
-        # Get local IP
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(("8.8.8.8", 80))
-            info["local_ip"] = s.getsockname()[0]
-            s.close()
-        except:
-            pass
-        
-        # Try to get Tailscale IP
-        try:
-            from src.networking.remote_access import TailscaleHelper
-            helper = TailscaleHelper()
-            if helper.is_installed():
-                ts_ip = helper.get_tailscale_ip()
-                if ts_ip:
-                    info["tailscale_ip"] = ts_ip
-                    info["tailscale_enabled"] = True
-        except:
-            info["tailscale_enabled"] = False
-        
-        return jsonify(info)
-    
-    @app.route("/api/test/remote", methods=["GET"])
-    def api_test_remote():
-        """Test endpoint to verify remote access from different networks/VPNs"""
-        import socket
-        
-        client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
-        user_agent = request.headers.get('User-Agent', 'Unknown')
-        
-        return jsonify({
-            "success": True,
-            "message": "Remote access working! You can connect from any network.",
-            "client_ip": client_ip,
-            "user_agent": user_agent,
-            "server_time": datetime.now().isoformat(),
-            "server_hostname": socket.gethostname(),
-            "authenticated": 'user' in session,
-            "connection_type": "vpn" if "100." in client_ip else "direct",
-            "tips": {
-                "local": f"http://{info.get('local_ip', 'LOCAL_IP')}:8080",
-                "tailscale": "Install Tailscale for secure VPN access",
-                "port_forward": "Configure port forwarding on your router"
-            }
-        })
-    
-    @app.route("/api/tailscale/install", methods=["POST"])
-    def api_tailscale_install():
-        """Guide for installing Tailscale VPN"""
-        if 'user' not in session:
-            return jsonify({'error': 'Authentication required'}), 401
-        
-        return jsonify({
-            "instructions": [
-                "SSH into your device",
-                "Run: curl -fsSL https://tailscale.com/install.sh | sh",
-                "Run: sudo tailscale up",
-                "Follow the authentication link",
-                "Access camera from anywhere using Tailscale IP"
-            ],
-            "status_endpoint": "/api/remote/access-info",
-            "documentation": "https://tailscale.com/kb/1017/install/"
-        })
     
     return app

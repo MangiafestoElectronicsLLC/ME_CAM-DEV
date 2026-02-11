@@ -128,7 +128,6 @@ class RpicamStreamer:
                 '-o', '-',  # Output to stdout
                 '--nopreview',
                 '--quality', str(self.quality),
-                '--rotation', '180',  # Flip camera 180 degrees
             ]
             
             result = subprocess.run(

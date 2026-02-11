@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Push Notification Settings - ME_CAM</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        .notification-settings {
+            max-width: 900px;
+            margin: 20px auto;
+            padding: 20px;
+        }
+
+        .setting-group {
+            background: #f5f5f5;
+            padding: 15px;
+            margin-bottom: 15px;
+            border-radius: 8px;
+            border: 1px solid #ddd;
+        }
+
+        .setting-group h3 {
+            margin-top: 0;
+            color: #333;
+            font-size: 18px;
+        }
+
+        .setting-row {
+            margin: 10px 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .setting-row label {
+            font-weight: 500;
+            color: #555;
+        }
+
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 50px;
+            height: 24px;
+        }
+
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 24px;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+
+        input:checked+.slider {
+            background-color: #4CAF50;
+        }
+
+        input:checked+.slider:before {
+            transform: translateX(26px);
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: background 0.3s;
+            margin-right: 10px;
+        }
+
+        .btn-primary {
+            background: #2196F3;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #0b7dda;
+        }
+
+        .btn-success {
+            background: #4CAF50;
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: #45a049;
+        }
+
+        .btn-danger {
+            background: #f44336;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #da190b;
+        }
+
+        .device-list {
+            max-height: 300px;
+            overflow-y: auto;
+            margin-top: 10px;
+        }
+
+        .device-item {
+            background: white;
+            padding: 10px;
+            margin-bottom: 8px;
+            border-radius: 4px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border: 1px solid #ddd;
+        }
+
+        .device-info {
+            flex: 1;
+        }
+
+        .device-name {
+            font-weight: 600;
+            color: #333;
+        }
+
+        .device-details {
+            font-size: 12px;
+            color: #777;
+            margin-top: 4px;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            margin-left: 8px;
+        }
+
+        .badge-web {
+            background: #2196F3;
+            color: white;
+        }
+
+        .badge-fcm {
+            background: #FF9800;
+            color: white;
+        }
+
+        .badge-sms {
+            background: #9C27B0;
+            color: white;
+        }
+
+        .alert-box {
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+        }
+
+        .alert-info {
+            background: #E3F2FD;
+            border-left: 4px solid #2196F3;
+            color: #0D47A1;
+        }
+
+        .alert-warning {
+            background: #FFF3E0;
+            border-left: 4px solid #FF9800;
+            color: #E65100;
+        }
+
+        .alert-success {
+            background: #E8F5E9;
+            border-left: 4px solid #4CAF50;
+            color: #1B5E20;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="notification-settings">
+        <h1>🔔 Push Notification Settings</h1>
+
+        <!-- Notification Status -->
+        <div id="permission-alert" class="alert-box alert-warning" style="display: none;">
+            <strong>⚠️ Browser Notifications Blocked</strong><br>
+            Please allow notifications in your browser settings to receive push alerts.
+        </div>
+
+        <div id="subscription-alert" class="alert-box alert-success" style="display: none;">
+            <strong>✅ Browser Notifications Enabled</strong><br>
+            You will receive push notifications on this device.
+        </div>
+
+        <!-- Web Push Notifications -->
+        <div class="setting-group">
+            <h3>🌐 Web Push Notifications</h3>
+            <div class="alert-box alert-info">
+                <strong>ℹ️ Browser Notifications</strong><br>
+                Receive instant push notifications in your browser (Chrome, Firefox, Edge, Safari).
+                Works even when the tab is closed!
+            </div>
+            <div class="setting-row">
+                <label>Enable Web Push</label>
+                <button id="webpush-subscribe-btn" class="btn btn-primary" onclick="subscribeWebPush()">
+                    Subscribe
+                </button>
+            </div>
+            <div class="setting-row">
+                <label>Test Notification</label>
+                <button class="btn btn-success" onclick="testWebPush()">🧪 Send Test</button>
+            </div>
+        </div>
+
+        <!-- Mobile Push Notifications (FCM) -->
+        <div class="setting-group">
+            <h3>📱 Mobile Push Notifications (FCM)</h3>
+            <div class="alert-box alert-info">
+                <strong>ℹ️ Mobile App Notifications</strong><br>
+                Receive notifications on Android and iOS mobile devices using Firebase Cloud Messaging.
+                Requires the ME_CAM mobile app (coming soon).
+            </div>
+            <div class="setting-row">
+                <label>FCM Device Token</label>
+                <input type="text" id="fcm-token" placeholder="Paste FCM token from mobile app" style="width: 400px;">
+            </div>
+            <div class="setting-row">
+                <button class="btn btn-primary" onclick="registerFCMToken()">Register Device</button>
+                <button class="btn btn-success" onclick="testFCM()">🧪 Send Test</button>
+            </div>
+        </div>
+
+        <!-- SMS Notifications -->
+        <div class="setting-group">
+            <h3>📲 SMS Notifications</h3>
+            <div class="setting-row">
+                <label>Enable SMS Alerts</label>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="sms-enabled" onchange="toggleSMS()">
+                    <span class="slider"></span>
+                </label>
+            </div>
+            <div class="setting-row">
+                <label>Phone Number</label>
+                <input type="tel" id="sms-phone" placeholder="+1234567890" style="width: 200px;">
+            </div>
+            <div class="setting-row">
+                <label>SMS Provider</label>
+                <select id="sms-provider" style="width: 200px;">
+                    <option value="twilio">Twilio</option>
+                    <option value="plivo">Plivo</option>
+                    <option value="custom">Custom API</option>
+                </select>
+            </div>
+        </div>
+
+        <!-- Notification Preferences -->
+        <div class="setting-group">
+            <h3>⚙️ Notification Preferences</h3>
+            <div class="setting-row">
+                <label>Motion Detection Alerts</label>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="notif-motion" checked>
+                    <span class="slider"></span>
+                </label>
+            </div>
+            <div class="setting-row">
+                <label>Security Alerts (Door/Window)</label>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="notif-security" checked>
+                    <span class="slider"></span>
+                </label>
+            </div>
+            <div class="setting-row">
+                <label>System Status Updates</label>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="notif-status">
+                    <span class="slider"></span>
+                </label>
+            </div>
+            <div class="setting-row">
+                <label>Daily Summary</label>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="notif-summary">
+                    <span class="slider"></span>
+                </label>
+            </div>
+            <div class="setting-row">
+                <label>Include Snapshot Image</label>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="notif-include-image" checked>
+                    <span class="slider"></span>
+                </label>
+            </div>
+            <div class="setting-row">
+                <label>Quiet Hours (No notifications)</label>
+                <input type="time" id="quiet-start" value="22:00" style="width: 90px;">
+                <span>to</span>
+                <input type="time" id="quiet-end" value="07:00" style="width: 90px;">
+            </div>
+        </div>
+
+        <!-- Registered Devices -->
+        <div class="setting-group">
+            <h3>📱 Registered Devices</h3>
+            <div class="device-list" id="device-list">
+                <p style="color: #999; text-align: center;">No devices registered</p>
+            </div>
+            <div class="setting-row">
+                <button class="btn btn-primary" onclick="refreshDevices()">🔄 Refresh List</button>
+                <button class="btn btn-danger" onclick="clearAllDevices()">🗑️ Clear All Devices</button>
+            </div>
+        </div>
+
+        <!-- Actions -->
+        <div class="setting-group">
+            <h3>💾 Save Settings</h3>
+            <button class="btn btn-success" onclick="saveSettings()">💾 Save All Settings</button>
+            <button class="btn btn-primary" onclick="broadcastTest()">📢 Broadcast Test to All Devices</button>
+        </div>
+    </div>
+
+    <script>
+        let vapidPublicKey = null;
+        let serviceWorkerRegistration = null;
+
+        // Initialize on page load
+        window.addEventListener('DOMContentLoaded', async () => {
+            await loadSettings();
+            await checkNotificationPermission();
+            await initServiceWorker();
+            refreshDevices();
+        });
+
+        async function initServiceWorker() {
+            if (!('serviceWorker' in navigator)) {
+                console.warn('Service Worker not supported');
+                return;
+            }
+
+            try {
+                serviceWorkerRegistration = await navigator.serviceWorker.register('/static/js/service-worker.js');
+                console.log('Service Worker registered');
+
+                // Get VAPID public key from server
+                const response = await fetch('/api/notifications/vapid_key');
+                const data = await response.json();
+                vapidPublicKey = data.public_key;
+
+                // Check if already subscribed
+                const subscription = await serviceWorkerRegistration.pushManager.getSubscription();
+                if (subscription) {
+                    document.getElementById('webpush-subscribe-btn').textContent = 'Unsubscribe';
+                    document.getElementById('webpush-subscribe-btn').onclick = unsubscribeWebPush;
+                    document.getElementById('subscription-alert').style.display = 'block';
+                }
+
+            } catch (error) {
+                console.error('Service Worker registration failed:', error);
+            }
+        }
+
+        async function checkNotificationPermission() {
+            if (!('Notification' in window)) {
+                return;
+            }
+
+            if (Notification.permission === 'denied') {
+                document.getElementById('permission-alert').style.display = 'block';
+            }
+        }
+
+        async function subscribeWebPush() {
+            if (!serviceWorkerRegistration || !vapidPublicKey) {
+                alert('Service Worker not initialized');
+                return;
+            }
+
+            try {
+                // Request notification permission
+                const permission = await Notification.requestPermission();
+                if (permission !== 'granted') {
+                    alert('Notification permission denied');
+                    return;
+                }
+
+                // Subscribe to push notifications
+                const subscription = await serviceWorkerRegistration.pushManager.subscribe({
+                    userVisibleOnly: true,
+                    applicationServerKey: urlBase64ToUint8Array(vapidPublicKey)
+                });
+
+                // Send subscription to server
+                const response = await fetch('/api/notifications/webpush/subscribe', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        subscription: subscription.toJSON(),
+                        device_name: navigator.userAgent.split(' ').slice(0, 3).join(' ')
+                    })
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    alert('✅ Subscribed to web push notifications!');
+                    document.getElementById('webpush-subscribe-btn').textContent = 'Unsubscribe';
+                    document.getElementById('webpush-subscribe-btn').onclick = unsubscribeWebPush;
+                    document.getElementById('subscription-alert').style.display = 'block';
+                    document.getElementById('permission-alert').style.display = 'none';
+                    refreshDevices();
+                } else {
+                    alert('❌ Subscription failed: ' + data.error);
+                }
+
+            } catch (error) {
+                console.error('Subscription error:', error);
+                alert('❌ Error: ' + error.message);
+            }
+        }
+
+        async function unsubscribeWebPush() {
+            if (!serviceWorkerRegistration) return;
+
+            try {
+                const subscription = await serviceWorkerRegistration.pushManager.getSubscription();
+                if (subscription) {
+                    await subscription.unsubscribe();
+
+                    // Notify server
+                    await fetch('/api/notifications/webpush/unsubscribe', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ subscription: subscription.toJSON() })
+                    });
+                }
+
+                alert('✅ Unsubscribed from web push notifications');
+                document.getElementById('webpush-subscribe-btn').textContent = 'Subscribe';
+                document.getElementById('webpush-subscribe-btn').onclick = subscribeWebPush;
+                document.getElementById('subscription-alert').style.display = 'none';
+                refreshDevices();
+
+            } catch (error) {
+                console.error('Unsubscribe error:', error);
+            }
+        }
+
+        async function testWebPush() {
+            try {
+                const response = await fetch('/api/notifications/test/webpush', { method: 'POST' });
+                const data = await response.json();
+                if (data.success) {
+                    alert('✅ Test notification sent! Check your browser.');
+                } else {
+                    alert('❌ Test failed: ' + data.error);
+                }
+            } catch (error) {
+                alert('❌ Error: ' + error.message);
+            }
+        }
+
+        async function registerFCMToken() {
+            const token = document.getElementById('fcm-token').value.trim();
+            if (!token) {
+                alert('Please enter an FCM token');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/notifications/fcm/register', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        fcm_token: token,
+                        device_name: prompt('Device name:', 'My Phone') || 'Mobile Device',
+                        platform: 'android'  // or 'ios'
+                    })
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    alert('✅ Device registered for FCM notifications!');
+                    document.getElementById('fcm-token').value = '';
+                    refreshDevices();
+                } else {
+                    alert('❌ Registration failed: ' + data.error);
+                }
+            } catch (error) {
+                alert('❌ Error: ' + error.message);
+            }
+        }
+
+        async function testFCM() {
+            try {
+                const response = await fetch('/api/notifications/test/fcm', { method: 'POST' });
+                const data = await response.json();
+                if (data.success) {
+                    alert('✅ Test notification sent to all FCM devices!');
+                } else {
+                    alert('❌ Test failed: ' + data.error);
+                }
+            } catch (error) {
+                alert('❌ Error: ' + error.message);
+            }
+        }
+
+        function toggleSMS() {
+            const enabled = document.getElementById('sms-enabled').checked;
+            console.log('SMS notifications:', enabled ? 'enabled' : 'disabled');
+        }
+
+        async function refreshDevices() {
+            try {
+                const response = await fetch('/api/notifications/devices');
+                const data = await response.json();
+
+                const deviceList = document.getElementById('device-list');
+                if (!data.devices || data.devices.length === 0) {
+                    deviceList.innerHTML = '<p style="color: #999; text-align: center;">No devices registered</p>';
+                    return;
+                }
+
+                deviceList.innerHTML = data.devices.map(device => `
+                    <div class="device-item">
+                        <div class="device-info">
+                            <div class="device-name">
+                                ${device.device_name || 'Unknown Device'}
+                                <span class="badge ${device.type === 'webpush' ? 'badge-web' : 'badge-fcm'}">
+                                    ${device.type === 'webpush' ? 'WEB' : 'FCM'}
+                                </span>
+                            </div>
+                            <div class="device-details">
+                                Registered: ${new Date(device.created_at).toLocaleString()} | 
+                                Notifications sent: ${device.notification_count || 0}
+                            </div>
+                        </div>
+                        <button class="btn btn-danger" onclick="removeDevice('${device.id}', '${device.type}')">
+                            🗑️ Remove
+                        </button>
+                    </div>
+                `).join('');
+
+            } catch (error) {
+                console.error('Failed to load devices:', error);
+            }
+        }
+
+        async function removeDevice(deviceId, type) {
+            if (!confirm('Remove this device?')) return;
+
+            try {
+                const endpoint = type === 'webpush'
+                    ? '/api/notifications/webpush/unsubscribe'
+                    : '/api/notifications/fcm/unregister';
+
+                await fetch(endpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ device_id: deviceId })
+                });
+
+                refreshDevices();
+            } catch (error) {
+                console.error('Remove device error:', error);
+            }
+        }
+
+        async function clearAllDevices() {
+            if (!confirm('Remove ALL registered devices?')) return;
+
+            try {
+                await fetch('/api/notifications/clear_all', { method: 'POST' });
+                alert('✅ All devices removed');
+                refreshDevices();
+            } catch (error) {
+                alert('❌ Error: ' + error.message);
+            }
+        }
+
+        async function broadcastTest() {
+            try {
+                const response = await fetch('/api/notifications/test/broadcast', { method: 'POST' });
+                const data = await response.json();
+                if (data.success) {
+                    alert(`✅ Test broadcast sent to ${data.sent_count} devices!`);
+                } else {
+                    alert('❌ Broadcast failed: ' + data.error);
+                }
+            } catch (error) {
+                alert('❌ Error: ' + error.message);
+            }
+        }
+
+        async function loadSettings() {
+            try {
+                const response = await fetch('/api/notifications/settings');
+                const data = await response.json();
+
+                document.getElementById('sms-enabled').checked = data.sms_enabled || false;
+                document.getElementById('sms-phone').value = data.sms_phone || '';
+                document.getElementById('sms-provider').value = data.sms_provider || 'twilio';
+                document.getElementById('notif-motion').checked = data.notify_motion !== false;
+                document.getElementById('notif-security').checked = data.notify_security !== false;
+                document.getElementById('notif-status').checked = data.notify_status || false;
+                document.getElementById('notif-summary').checked = data.notify_summary || false;
+                document.getElementById('notif-include-image').checked = data.include_image !== false;
+                document.getElementById('quiet-start').value = data.quiet_hours_start || '22:00';
+                document.getElementById('quiet-end').value = data.quiet_hours_end || '07:00';
+            } catch (error) {
+                console.error('Failed to load settings:', error);
+            }
+        }
+
+        async function saveSettings() {
+            const settings = {
+                sms_enabled: document.getElementById('sms-enabled').checked,
+                sms_phone: document.getElementById('sms-phone').value,
+                sms_provider: document.getElementById('sms-provider').value,
+                notify_motion: document.getElementById('notif-motion').checked,
+                notify_security: document.getElementById('notif-security').checked,
+                notify_status: document.getElementById('notif-status').checked,
+                notify_summary: document.getElementById('notif-summary').checked,
+                include_image: document.getElementById('notif-include-image').checked,
+                quiet_hours_start: document.getElementById('quiet-start').value,
+                quiet_hours_end: document.getElementById('quiet-end').value
+            };
+
+            try {
+                const response = await fetch('/api/notifications/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(settings)
+                });
+
+                const data = await response.json();
+                alert(data.success ? '✅ Settings saved!' : '❌ Failed to save');
+            } catch (error) {
+                alert('❌ Error: ' + error.message);
+            }
+        }
+
+        // Helper: Convert VAPID key to Uint8Array
+        function urlBase64ToUint8Array(base64String) {
+            const padding = '='.repeat((4 - base64String.length % 4) % 4);
+            const base64 = (base64String + padding).replace(/\-/g, '+').replace(/_/g, '/');
+            const rawData = window.atob(base64);
+            const outputArray = new Uint8Array(rawData.length);
+            for (let i = 0; i < rawData.length; ++i) {
+                outputArray[i] = rawData.charCodeAt(i);
+            }
+            return outputArray;
+        }
+    </script>
+</body>
+
+</html>
