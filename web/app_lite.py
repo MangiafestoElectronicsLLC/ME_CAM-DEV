@@ -9,7 +9,7 @@ Lightweight Flask App for Pi Zero 2W - COMPLETE VERSION
 - Battery monitoring
 """
 
-from flask import Flask, render_template, request, redirect, url_for, session, jsonify, Response, send_file
+from flask import Flask, render_template, request, redirect, url_for, session, jsonify, Response, send_file, after_this_request, abort
 from flask_cors import CORS
 from loguru import logger
 import os
@@ -22,6 +22,8 @@ import json
 import shutil
 import asyncio
 from functools import wraps
+import secrets
+import ipaddress
 
 # Add src directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'src'))
@@ -31,6 +33,13 @@ from src.core import (
     authenticate, BatteryMonitor, log_motion_event, get_recent_events,
     get_event_statistics
 )
+from src.core.secure_encryption import get_encryption
+try:
+    from src.cloud.encrypted_cloud_storage import get_cloud_storage
+    CLOUD_AVAILABLE = True
+except Exception as e:
+    CLOUD_AVAILABLE = False
+    logger.warning(f"[CLOUD] Encrypted cloud storage not available: {e}")
 
 # v3.0 modules
 try:
@@ -62,6 +71,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Offline queues (lightweight JSON logs; safe for Pi Zero 2W)
 OFFLINE_QUEUE_FILE = os.path.join(BASE_DIR, "logs", "offline_queue.json")
 NOTIFY_QUEUE_FILE = os.path.join(BASE_DIR, "logs", "notification_queue.json")
+SHARE_LINKS_FILE = os.path.join(BASE_DIR, "logs", "share_links.json")
 
 
 def _ensure_log_dir(path: str) -> None:
@@ -87,6 +97,116 @@ def _save_queue(path: str, items: list) -> None:
             json.dump(items, f, indent=2)
     except Exception as e:
         logger.error(f"[QUEUE] Failed to save {path}: {e}")
+
+
+def _load_share_links() -> dict:
+    _ensure_log_dir(SHARE_LINKS_FILE)
+    if not os.path.exists(SHARE_LINKS_FILE):
+        return {}
+    try:
+        with open(SHARE_LINKS_FILE, "r") as f:
+            return json.load(f)
+    except Exception as e:
+        logger.warning(f"[SHARE] Failed to load links: {e}")
+        return {}
+
+
+def _save_share_links(links: dict) -> None:
+    _ensure_log_dir(SHARE_LINKS_FILE)
+    try:
+        with open(SHARE_LINKS_FILE, "w") as f:
+            json.dump(links, f, indent=2)
+    except Exception as e:
+        logger.error(f"[SHARE] Failed to save links: {e}")
+
+
+def _get_security_cfg(cfg: dict) -> dict:
+    return cfg.get("security", {}) or {}
+
+
+def _ensure_security_cfg(cfg: dict) -> dict:
+    security = cfg.get("security") or {}
+    changed = False
+    if not security.get("device_token"):
+        security["device_token"] = secrets.token_urlsafe(32)
+        changed = True
+    if not security.get("secret_key"):
+        security["secret_key"] = secrets.token_urlsafe(32)
+        changed = True
+    if "tailscale_only" not in security:
+        security["tailscale_only"] = True
+        changed = True
+    if "share_links_enabled" not in security:
+        security["share_links_enabled"] = True
+        changed = True
+    if "share_link_expiry_hours" not in security:
+        security["share_link_expiry_hours"] = 72
+        changed = True
+    if "session_timeout_minutes" not in security:
+        security["session_timeout_minutes"] = 720
+        changed = True
+    if "allow_localhost" not in security:
+        security["allow_localhost"] = True
+        changed = True
+    if "allow_setup_without_vpn" not in security:
+        security["allow_setup_without_vpn"] = True
+        changed = True
+    cfg["security"] = security
+    if changed:
+        save_config(cfg)
+    return security
+
+
+def _get_storage_cfg(cfg: dict) -> dict:
+    storage = cfg.get("storage", {}) or {}
+    return {
+        "recordings_dir": storage.get("recordings_dir", "recordings"),
+        "encrypted_dir": cfg.get("storage_encrypted_dir", storage.get("encrypted_dir", "recordings_encrypted")),
+        "encrypt": cfg.get("storage_encrypt", storage.get("encrypt", False)),
+        "retention_days": cfg.get("storage_cleanup_days", storage.get("retention_days", 7))
+    }
+
+
+def _get_gdrive_cfg(cfg: dict) -> dict:
+    gdrive = cfg.get("google_drive", {}) or {}
+    return {
+        "enabled": cfg.get("gdrive_enabled", gdrive.get("enabled", False)),
+        "folder_id": cfg.get("gdrive_folder_id", gdrive.get("folder_id", "")),
+        "credentials_file": gdrive.get("credentials_file", "config/gdrive_credentials.json")
+    }
+
+
+def _get_client_ip() -> str:
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.remote_addr or ""
+
+
+def _is_tailscale_ip(ip: str) -> bool:
+    try:
+        addr = ipaddress.ip_address(ip)
+        if addr.version == 4:
+            return addr in ipaddress.ip_network("100.64.0.0/10")
+        return addr in ipaddress.ip_network("fd7a:115c:a1e0::/48")
+    except Exception:
+        return False
+
+
+def _is_allowed_client(cfg: dict) -> bool:
+    security = _get_security_cfg(cfg)
+    if not security.get("tailscale_only", False):
+        return True
+
+    ip = _get_client_ip()
+    if security.get("allow_localhost", True) and ip in ("127.0.0.1", "::1"):
+        return True
+
+    if security.get("allow_setup_without_vpn", True) and is_first_run():
+        if request.path.startswith("/setup") or request.path.startswith("/login") or request.path.startswith("/register"):
+            return True
+
+    return _is_tailscale_ip(ip)
 
 
 def is_wifi_connected() -> bool:
@@ -197,6 +317,115 @@ def mark_offline_clips_synced() -> None:
         _save_queue(OFFLINE_QUEUE_FILE, items)
 
 
+def _resolve_clip_path(filename: str, cfg: dict) -> tuple:
+    if not filename or "/" in filename or "\\" in filename or ".." in filename:
+        return None, False
+
+    storage = _get_storage_cfg(cfg)
+    recordings_path = os.path.join(BASE_DIR, storage["recordings_dir"], filename)
+    encrypted_path = os.path.join(BASE_DIR, storage["encrypted_dir"], filename)
+
+    if os.path.exists(recordings_path):
+        return recordings_path, False
+    if os.path.exists(encrypted_path):
+        return encrypted_path, filename.endswith(".enc")
+
+    if not filename.endswith(".enc"):
+        alt_enc = os.path.join(BASE_DIR, storage["encrypted_dir"], f"{filename}.enc")
+        if os.path.exists(alt_enc):
+            return alt_enc, True
+
+    return None, False
+
+
+def _decrypt_to_temp(enc_path: str) -> str:
+    try:
+        temp_dir = os.path.join(BASE_DIR, "cache", "temp_decrypt")
+        os.makedirs(temp_dir, exist_ok=True)
+        temp_path = os.path.join(temp_dir, f"clip_{secrets.token_hex(8)}.mp4")
+        enc = get_encryption()
+        if enc.decrypt_file(enc_path, temp_path):
+            return temp_path
+    except Exception as e:
+        logger.error(f"[ENCRYPTION] Temp decrypt failed: {e}")
+    return None
+
+
+def _encrypt_clip_if_enabled(file_path: str, cfg: dict) -> tuple:
+    storage = _get_storage_cfg(cfg)
+    if not storage.get("encrypt"):
+        return file_path, False
+
+    try:
+        encrypted_dir = os.path.join(BASE_DIR, storage["encrypted_dir"])
+        os.makedirs(encrypted_dir, exist_ok=True)
+        enc = get_encryption()
+        output_path = os.path.join(encrypted_dir, os.path.basename(file_path) + ".enc")
+        if enc.encrypt_file(file_path, output_path):
+            try:
+                os.remove(file_path)
+            except Exception:
+                pass
+            return output_path, True
+    except Exception as e:
+        logger.error(f"[ENCRYPTION] Clip encryption failed: {e}")
+    return file_path, False
+
+
+def _queue_cloud_upload(file_path: str, meta: dict = None) -> str:
+    if not CLOUD_AVAILABLE:
+        return None
+    cfg = get_config()
+    gdrive = _get_gdrive_cfg(cfg)
+    if not gdrive.get("enabled"):
+        return None
+    if not is_wifi_connected():
+        return None
+
+    try:
+        cloud = get_cloud_storage(base_dir=BASE_DIR, google_credentials=gdrive.get("credentials_file"))
+        return cloud.queue_upload(file_path, remote_folder=gdrive.get("folder_id") or None, metadata=meta or {})
+    except Exception as e:
+        logger.warning(f"[CLOUD] Queue upload failed: {e}")
+        return None
+
+
+def flush_offline_clip_queue() -> None:
+    if not is_wifi_connected():
+        return
+
+    cfg = get_config()
+    gdrive = _get_gdrive_cfg(cfg)
+    if not gdrive.get("enabled"):
+        return
+
+    items = _load_queue(OFFLINE_QUEUE_FILE)
+    if not items:
+        return
+
+    remaining = []
+    for item in items:
+        if item.get("queued") or item.get("synced"):
+            remaining.append(item)
+            continue
+
+        filename = item.get("video_path")
+        path, _ = _resolve_clip_path(filename, cfg)
+        if not path or not os.path.exists(path):
+            item["error"] = "file_missing"
+            remaining.append(item)
+            continue
+
+        upload_id = _queue_cloud_upload(path, meta=item.get("meta"))
+        if upload_id:
+            item["queued"] = True
+            item["queued_at"] = datetime.utcnow().isoformat()
+            item["upload_id"] = upload_id
+        remaining.append(item)
+
+    _save_queue(OFFLINE_QUEUE_FILE, remaining)
+
+
 # Throttle background flush work to keep Pi Zero responsive
 _last_queue_flush = 0
 
@@ -207,21 +436,30 @@ def maybe_flush_queues(throttle_seconds: int = 30) -> None:
         return
     _last_queue_flush = now
     flush_notification_queue()
-    mark_offline_clips_synced()
+    flush_offline_clip_queue()
 
 def create_lite_app(pi_model, camera_config):
     """Create lightweight Flask app with all features"""
     
     app = Flask(__name__, template_folder='templates', static_folder='static')
-    app.secret_key = os.urandom(24)
+    cfg = get_config()
+    security = _ensure_security_cfg(cfg)
+    app.secret_key = security.get("secret_key")
+    app.config.update(
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE="Lax",
+        SESSION_COOKIE_SECURE=bool(security.get("cookie_secure", False)),
+        PERMANENT_SESSION_LIFETIME=timedelta(minutes=int(security.get("session_timeout_minutes", 720)))
+    )
     
     # VPN SUPPORT: Add CORS and security headers for VPN connections
     @app.after_request
     def add_vpn_headers(response):
         """Add headers for VPN and remote access support from ANY network"""
-        # Allow requests from any origin (different WiFi, cellular, VPN clients)
-        origin = request.headers.get('Origin', '*')
-        response.headers['Access-Control-Allow-Origin'] = origin
+        origin = request.headers.get('Origin')
+        if origin and origin.startswith(request.host_url.rstrip('/')):
+            response.headers['Access-Control-Allow-Origin'] = origin
+            response.headers['Vary'] = 'Origin'
         response.headers['Access-Control-Allow-Credentials'] = 'true'
         response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
         response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With'
@@ -250,13 +488,38 @@ def create_lite_app(pi_model, camera_config):
     def handle_preflight():
         if request.method == "OPTIONS":
             response = Response()
-            response.headers['Access-Control-Allow-Origin'] = '*'
+            origin = request.headers.get('Origin')
+            if origin and origin.startswith(request.host_url.rstrip('/')):
+                response.headers['Access-Control-Allow-Origin'] = origin
             response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
             response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
             return response
+
+    @app.before_request
+    def enforce_tailscale_only():
+        if request.path.startswith("/static"):
+            return None
+
+        current_cfg = get_config()
+        if _get_security_cfg(current_cfg).get("tailscale_only") and not _is_allowed_client(current_cfg):
+            logger.warning(f"[SECURITY] Blocked non-Tailscale access: {request.path} from {_get_client_ip()}")
+            if request.path.startswith("/api/"):
+                return jsonify({"error": "Tailscale access required"}), 403
+            return render_template("access_blocked.html"), 403
     
     # Lightweight battery monitor
     battery = BatteryMonitor(enabled=True)
+
+    # Background queue flush for offline clips/cloud sync
+    def _background_sync():
+        while True:
+            try:
+                maybe_flush_queues(30)
+            except Exception as e:
+                logger.debug(f"[SYNC] Background sync error: {e}")
+            time.sleep(15)
+
+    threading.Thread(target=_background_sync, daemon=True).start()
     
     # Motion recording state
     motion_recorder = {
@@ -303,8 +566,11 @@ def create_lite_app(pi_model, camera_config):
     
     def get_storage_info():
         """Get storage information"""
-        recordings_path = os.path.join(BASE_DIR, "recordings")
+        storage_cfg = _get_storage_cfg(get_config())
+        recordings_path = os.path.join(BASE_DIR, storage_cfg["recordings_dir"])
+        encrypted_path = os.path.join(BASE_DIR, storage_cfg["encrypted_dir"])
         os.makedirs(recordings_path, exist_ok=True)
+        os.makedirs(encrypted_path, exist_ok=True)
         
         total, used, free = shutil.disk_usage(recordings_path)
         
@@ -320,6 +586,15 @@ def create_lite_app(pi_model, camera_config):
                             total_size_mb += os.path.getsize(os.path.join(root, f)) / (1024*1024)
                         except:
                             pass
+        if os.path.exists(encrypted_path):
+            for root, dirs, files in os.walk(encrypted_path):
+                for f in files:
+                    if f.endswith('.enc'):
+                        recording_count += 1
+                        try:
+                            total_size_mb += os.path.getsize(os.path.join(root, f)) / (1024*1024)
+                        except:
+                            pass
         
         return {
             'total_gb': round(total / (1024**3), 2),
@@ -328,13 +603,49 @@ def create_lite_app(pi_model, camera_config):
             'recording_count': recording_count,
             'recordings_size_mb': round(total_size_mb, 2)
         }
+
+    def list_clips():
+        """List recordings and encrypted clips for the library page"""
+        cfg = get_config()
+        storage_cfg = _get_storage_cfg(cfg)
+        recordings_path = os.path.join(BASE_DIR, storage_cfg["recordings_dir"])
+        encrypted_path = os.path.join(BASE_DIR, storage_cfg["encrypted_dir"])
+        clips = []
+
+        def add_clip(path, name, encrypted=False):
+            try:
+                stat = os.stat(path)
+                clips.append({
+                    "name": name,
+                    "encrypted": encrypted,
+                    "size_mb": round(stat.st_size / (1024 * 1024), 2),
+                    "timestamp": datetime.fromtimestamp(stat.st_mtime),
+                    "timestamp_str": datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M")
+                })
+            except Exception:
+                pass
+
+        if os.path.isdir(recordings_path):
+            for name in os.listdir(recordings_path):
+                if name.lower().endswith((".mp4", ".mov", ".avi", ".mkv")):
+                    add_clip(os.path.join(recordings_path, name), name, encrypted=False)
+
+        if os.path.isdir(encrypted_path):
+            for name in os.listdir(encrypted_path):
+                if name.lower().endswith(".enc"):
+                    add_clip(os.path.join(encrypted_path, name), name, encrypted=True)
+
+        clips.sort(key=lambda c: c["timestamp"], reverse=True)
+        return clips
     
     def cleanup_old_recordings(days=7):
         """Delete recordings older than X days"""
-        recordings_path = os.path.join(BASE_DIR, "recordings")
+        storage_cfg = _get_storage_cfg(get_config())
+        recordings_path = os.path.join(BASE_DIR, storage_cfg["recordings_dir"])
+        encrypted_path = os.path.join(BASE_DIR, storage_cfg["encrypted_dir"])
         cutoff = datetime.now() - timedelta(days=days)
         
-        if not os.path.exists(recordings_path):
+        if not os.path.exists(recordings_path) and not os.path.exists(encrypted_path):
             return {'deleted': 0, 'freed_mb': 0}
         
         deleted_count = 0
@@ -354,6 +665,21 @@ def create_lite_app(pi_model, camera_config):
                             logger.info(f"[STORAGE] Deleted old recording: {f}")
                     except Exception as e:
                         logger.error(f"[STORAGE] Delete failed: {f}: {e}")
+
+        for root, dirs, files in os.walk(encrypted_path):
+            for f in files:
+                if f.endswith('.enc'):
+                    fpath = os.path.join(root, f)
+                    try:
+                        mtime = datetime.fromtimestamp(os.path.getmtime(fpath))
+                        if mtime < cutoff:
+                            size_mb = os.path.getsize(fpath) / (1024*1024)
+                            os.remove(fpath)
+                            deleted_count += 1
+                            freed_mb += size_mb
+                            logger.info(f"[STORAGE] Deleted old encrypted recording: {f}")
+                    except Exception as e:
+                        logger.error(f"[STORAGE] Encrypted delete failed: {f}: {e}")
         
         return {'deleted': deleted_count, 'freed_mb': round(freed_mb, 2)}
     
@@ -512,9 +838,16 @@ def create_lite_app(pi_model, camera_config):
                     except Exception:
                         pass
 
+            cfg = get_config()
+            final_path, encrypted = _encrypt_clip_if_enabled(filepath, cfg)
+            final_name = os.path.basename(final_path)
+
             total_frames = len(buffered_frames) + max(0, additional_frames)
-            logger.info(f"[MOTION] Saved {total_frames} frames ({len(buffered_frames)} buffered) to: {filename}")
-            return filename
+            if encrypted:
+                logger.info(f"[MOTION] Saved {total_frames} frames to encrypted clip: {final_name}")
+            else:
+                logger.info(f"[MOTION] Saved {total_frames} frames ({len(buffered_frames)} buffered) to: {filename}")
+            return final_name
         except Exception as e:
             logger.error(f"[MOTION] Save buffered clip failed: {e}")
             return None
@@ -552,9 +885,9 @@ def create_lite_app(pi_model, camera_config):
                 if event_to_delete:
                     video_path = event_to_delete.get('details', {}).get('video_path')
                     if video_path:
-                        # video_path is just filename like "motion_20260120_141043.mp4"
-                        full_path = os.path.join(BASE_DIR, "recordings", video_path)
-                        if os.path.exists(full_path):
+                        cfg = get_config()
+                        full_path, _ = _resolve_clip_path(video_path, cfg)
+                        if full_path and os.path.exists(full_path):
                             os.remove(full_path)
                             logger.info(f"[MOTION] Deleted video file: {full_path}")
                         else:
@@ -614,7 +947,10 @@ def create_lite_app(pi_model, camera_config):
             password = request.form.get("password")
             
             if authenticate(username, password):
+                session.permanent = True
                 session['user'] = username
+                session['login_at'] = datetime.utcnow().isoformat()
+                session['device_token'] = _get_security_cfg(get_config()).get('device_token')
                 return redirect(url_for('index'))
             else:
                 return render_template('login.html', error="Invalid credentials")
@@ -666,6 +1002,7 @@ def create_lite_app(pi_model, camera_config):
         
         if request.method == "POST":
             cfg = get_config()
+            security_cfg = _ensure_security_cfg(cfg)
             cfg['device_name'] = request.form.get('device_name', 'ME Camera')
             cfg['device_id'] = request.form.get('device_id', 'camera-001')
             cfg['device_location'] = request.form.get('device_location', '')
@@ -684,16 +1021,39 @@ def create_lite_app(pi_model, camera_config):
             cfg['gdrive_folder_id'] = request.form.get('gdrive_folder_id', '')
             cfg['wifi_enabled'] = request.form.get('wifi_enabled', True) == 'on'
             cfg['bluetooth_enabled'] = request.form.get('bluetooth_enabled', False) == 'on'
+            security_cfg['tailscale_only'] = request.form.get('tailscale_only', True) == 'on'
+            security_cfg['share_links_enabled'] = request.form.get('share_links_enabled', True) == 'on'
+            cfg['security'] = security_cfg
+            cfg.setdefault('storage', {})
+            cfg['storage']['retention_days'] = int(request.form.get('retention_days', 7))
+            cfg['storage']['encrypt'] = cfg.get('storage_encrypt', False)
+            cfg['storage']['encrypted_dir'] = cfg.get('storage_encrypted_dir', 'recordings_encrypted')
+            cfg.setdefault('google_drive', {})
+            cfg['google_drive']['enabled'] = cfg.get('gdrive_enabled', False)
+            cfg['google_drive']['folder_id'] = cfg.get('gdrive_folder_id', '')
             save_config(cfg)
-            
+
+            admin_username = request.form.get('admin_username', '').strip()
+            admin_password = request.form.get('admin_password', '')
+            admin_password_confirm = request.form.get('admin_password_confirm', '')
+
+            if not admin_username or len(admin_username) < 3:
+                return render_template('first_run.html', pi_model=pi_model, config=get_config(), error="Admin username must be at least 3 characters")
+            if not admin_password or len(admin_password) < 8:
+                return render_template('first_run.html', pi_model=pi_model, config=get_config(), error="Admin password must be at least 8 characters")
+            if admin_password != admin_password_confirm:
+                return render_template('first_run.html', pi_model=pi_model, config=get_config(), error="Admin passwords do not match")
+
             from src.core import create_user
-            create_user('admin', 'admin123')
-            
+            if not create_user(admin_username, admin_password):
+                return render_template('first_run.html', pi_model=pi_model, config=get_config(), error="Failed to create admin user")
+
             mark_first_run_complete()
             return redirect(url_for('login'))
         
         # Get current config for display
         cfg = get_config()
+        security_cfg = _ensure_security_cfg(cfg)
         config_display = {
             'device_name': cfg.get('device_name', 'ME Camera'),
             'device_id': cfg.get('device_id', 'camera-001'),
@@ -727,6 +1087,10 @@ def create_lite_app(pi_model, camera_config):
             'motion_record_duration': cfg.get('motion_record_duration', 10),
             'sms_enabled': cfg.get('sms_enabled', False),
             'sms_phone_to': cfg.get('sms_phone_to', ''),
+            'security': {
+                'tailscale_only': security_cfg.get('tailscale_only', True),
+                'share_links_enabled': security_cfg.get('share_links_enabled', True)
+            }
         }
         
         return render_template('first_run.html', pi_model=pi_model, config=config_display)
@@ -764,20 +1128,57 @@ def create_lite_app(pi_model, camera_config):
         """Serve recorded video/image files"""
         if 'user' not in session:
             return redirect(url_for('login'))
-        
-        recordings_path = os.path.join(BASE_DIR, "recordings")
-        from flask import send_from_directory
-        return send_from_directory(recordings_path, filename)
+
+        cfg = get_config()
+        file_path, encrypted = _resolve_clip_path(filename, cfg)
+        if not file_path or not os.path.exists(file_path):
+            abort(404)
+
+        if encrypted:
+            temp_path = _decrypt_to_temp(file_path)
+            if not temp_path:
+                abort(500)
+
+            @after_this_request
+            def cleanup(response):
+                try:
+                    os.remove(temp_path)
+                except Exception:
+                    pass
+                return response
+
+            return send_file(temp_path, mimetype='video/mp4', as_attachment=False)
+
+        return send_file(file_path, mimetype='video/mp4', as_attachment=False)
     
     @app.route("/motion-events", methods=["GET"])
     def motion_events_page():
-        """View motion events - no auth required for view"""
+        """View motion events"""
+        if 'user' not in session:
+            return redirect(url_for('login'))
         events = get_motion_events()
         return render_template('motion_events.html', events=events)
+
+    @app.route("/clips", methods=["GET"])
+    def clips_page():
+        """Clips library (view/share/download)"""
+        if 'user' not in session:
+            return redirect(url_for('login'))
+
+        cfg = get_config()
+        security_cfg = _get_security_cfg(cfg)
+        clips = list_clips()
+        return render_template(
+            'clips.html',
+            clips=clips,
+            share_enabled=security_cfg.get('share_links_enabled', True)
+        )
     
     @app.route("/video_feed")
     def video_feed():
         """Live video stream - accessible from authenticated dashboard"""
+        if 'user' not in session:
+            return jsonify({'error': 'Not authenticated'}), 401
         # Stream available if first-run complete (setup done) but allow if logged in too
         # This is an MJPEG stream meant to be embedded in authenticated page
         try:
@@ -941,12 +1342,16 @@ network={{
     @app.route("/api/storage", methods=["GET"])
     def api_storage():
         """Storage info"""
+        if 'user' not in session:
+            return jsonify({'error': 'Not authenticated'}), 401
         storage = get_storage_info()
         return jsonify(storage)
     
     @app.route("/api/motion/events", methods=["GET"])
     def api_motion_events():
-        """Get motion events with optional time filtering - no auth required for read"""
+        """Get motion events with optional time filtering"""
+        if 'user' not in session:
+            return jsonify({'error': 'Not authenticated', 'events': [], 'count': 0}), 401
         try:
             all_events = get_motion_events()
             
@@ -1087,13 +1492,26 @@ network={{
             if '/' in video_filename or '\\' in video_filename or '..' in video_filename:
                 return jsonify({'error': 'Invalid filename'}), 400
             
-            video_path = os.path.join(BASE_DIR, "recordings", video_filename)
-            
-            # Verify file exists and is an mp4
-            if not os.path.exists(video_path) or not video_filename.endswith('.mp4'):
+            cfg = get_config()
+            video_path, encrypted = _resolve_clip_path(video_filename, cfg)
+            if not video_path or not os.path.exists(video_path):
                 return jsonify({'error': 'Video not found'}), 404
             
-            # Stream the video
+            if encrypted:
+                temp_path = _decrypt_to_temp(video_path)
+                if not temp_path:
+                    return jsonify({'error': 'Decryption failed'}), 500
+
+                @after_this_request
+                def cleanup(response):
+                    try:
+                        os.remove(temp_path)
+                    except Exception:
+                        pass
+                    return response
+
+                return send_file(temp_path, mimetype='video/mp4', as_attachment=False)
+
             return send_file(video_path, mimetype='video/mp4', as_attachment=False)
         except Exception as e:
             logger.error(f"[VIDEO] Stream error: {e}")
@@ -1110,13 +1528,26 @@ network={{
             if '/' in video_filename or '\\' in video_filename or '..' in video_filename:
                 return jsonify({'error': 'Invalid filename'}), 400
             
-            video_path = os.path.join(BASE_DIR, "recordings", video_filename)
-            
-            # Verify file exists and is an mp4
-            if not os.path.exists(video_path) or not video_filename.endswith('.mp4'):
+            cfg = get_config()
+            video_path, encrypted = _resolve_clip_path(video_filename, cfg)
+            if not video_path or not os.path.exists(video_path):
                 return jsonify({'error': 'Video not found'}), 404
             
-            # Download the video
+            if encrypted:
+                temp_path = _decrypt_to_temp(video_path)
+                if not temp_path:
+                    return jsonify({'error': 'Decryption failed'}), 500
+
+                @after_this_request
+                def cleanup(response):
+                    try:
+                        os.remove(temp_path)
+                    except Exception:
+                        pass
+                    return response
+
+                return send_file(temp_path, mimetype='video/mp4', as_attachment=True, download_name=video_filename.replace('.enc', ''))
+
             return send_file(video_path, mimetype='video/mp4', as_attachment=True, download_name=video_filename)
         except Exception as e:
             logger.error(f"[VIDEO] Download error: {e}")
@@ -1133,13 +1564,11 @@ network={{
             if '/' in video_filename or '\\' in video_filename or '..' in video_filename:
                 return jsonify({'error': 'Invalid filename'}), 400
             
-            video_path = os.path.join(BASE_DIR, "recordings", video_filename)
-            
-            # Verify file exists
-            if not os.path.exists(video_path):
+            cfg = get_config()
+            video_path, _ = _resolve_clip_path(video_filename, cfg)
+            if not video_path or not os.path.exists(video_path):
                 return jsonify({'error': 'Video not found'}), 404
             
-            # Delete the video file
             file_size_mb = os.path.getsize(video_path) / (1024 * 1024)
             os.remove(video_path)
             
@@ -1162,6 +1591,139 @@ network={{
         except Exception as e:
             logger.error(f"[VIDEO] Delete error: {e}")
             return jsonify({'ok': False, 'error': str(e)}), 500
+
+    def _get_share_record(token: str) -> dict:
+        links = _load_share_links()
+        record = links.get(token)
+        if not record:
+            return None
+        try:
+            expires_at = record.get("expires_at")
+            if expires_at:
+                expiry = datetime.fromisoformat(expires_at)
+                if datetime.utcnow() > expiry:
+                    links.pop(token, None)
+                    _save_share_links(links)
+                    return None
+        except Exception:
+            pass
+        return record
+
+    @app.route("/api/clips/share", methods=["POST"])
+    def api_create_share_link():
+        """Create a shareable link for a clip"""
+        if 'user' not in session:
+            return jsonify({'error': 'Not authenticated'}), 401
+
+        cfg = get_config()
+        security_cfg = _get_security_cfg(cfg)
+        if not security_cfg.get('share_links_enabled', True):
+            return jsonify({'error': 'Share links disabled'}), 403
+
+        data = request.get_json() or {}
+        filename = (data.get('filename') or '').strip()
+        if not filename:
+            return jsonify({'error': 'Filename required'}), 400
+
+        clip_path, _ = _resolve_clip_path(filename, cfg)
+        if not clip_path or not os.path.exists(clip_path):
+            return jsonify({'error': 'Clip not found'}), 404
+
+        token = secrets.token_urlsafe(32)
+        expiry_hours = int(security_cfg.get('share_link_expiry_hours', 72))
+        expires_at = (datetime.utcnow() + timedelta(hours=expiry_hours)).isoformat()
+
+        links = _load_share_links()
+        links[token] = {
+            "filename": filename,
+            "created_at": datetime.utcnow().isoformat(),
+            "expires_at": expires_at
+        }
+        _save_share_links(links)
+
+        share_url = f"{request.host_url.rstrip('/')}/share/{token}"
+        return jsonify({"ok": True, "share_url": share_url, "expires_at": expires_at})
+
+    @app.route("/api/clips/share/<token>", methods=["DELETE"])
+    def api_revoke_share_link(token):
+        """Revoke a share link"""
+        if 'user' not in session:
+            return jsonify({'error': 'Not authenticated'}), 401
+        links = _load_share_links()
+        if token in links:
+            links.pop(token, None)
+            _save_share_links(links)
+            return jsonify({"ok": True})
+        return jsonify({"ok": False, "error": "Not found"}), 404
+
+    @app.route("/share/<token>", methods=["GET"])
+    def share_view(token):
+        record = _get_share_record(token)
+        if not record:
+            return render_template('access_blocked.html'), 404
+
+        cfg = get_config()
+        clip_path, encrypted = _resolve_clip_path(record.get("filename"), cfg)
+        if not clip_path or not os.path.exists(clip_path):
+            return render_template('access_blocked.html'), 404
+
+        return render_template('share_view.html', token=token, filename=record.get("filename"), encrypted=encrypted)
+
+    @app.route("/share/<token>/stream", methods=["GET"])
+    def share_stream(token):
+        record = _get_share_record(token)
+        if not record:
+            return jsonify({'error': 'Invalid share link'}), 404
+
+        cfg = get_config()
+        clip_path, encrypted = _resolve_clip_path(record.get("filename"), cfg)
+        if not clip_path or not os.path.exists(clip_path):
+            return jsonify({'error': 'Clip not found'}), 404
+
+        if encrypted:
+            temp_path = _decrypt_to_temp(clip_path)
+            if not temp_path:
+                return jsonify({'error': 'Decryption failed'}), 500
+
+            @after_this_request
+            def cleanup(response):
+                try:
+                    os.remove(temp_path)
+                except Exception:
+                    pass
+                return response
+
+            return send_file(temp_path, mimetype='video/mp4', as_attachment=False)
+
+        return send_file(clip_path, mimetype='video/mp4', as_attachment=False)
+
+    @app.route("/share/<token>/download", methods=["GET"])
+    def share_download(token):
+        record = _get_share_record(token)
+        if not record:
+            return jsonify({'error': 'Invalid share link'}), 404
+
+        cfg = get_config()
+        clip_path, encrypted = _resolve_clip_path(record.get("filename"), cfg)
+        if not clip_path or not os.path.exists(clip_path):
+            return jsonify({'error': 'Clip not found'}), 404
+
+        if encrypted:
+            temp_path = _decrypt_to_temp(clip_path)
+            if not temp_path:
+                return jsonify({'error': 'Decryption failed'}), 500
+
+            @after_this_request
+            def cleanup(response):
+                try:
+                    os.remove(temp_path)
+                except Exception:
+                    pass
+                return response
+
+            return send_file(temp_path, mimetype='video/mp4', as_attachment=True, download_name=record.get("filename", "clip.mp4").replace('.enc', ''))
+
+        return send_file(clip_path, mimetype='video/mp4', as_attachment=True, download_name=record.get("filename", "clip.mp4"))
     
     @app.route("/api/config/update", methods=["POST"])
     def api_config_update():
@@ -1183,6 +1745,8 @@ network={{
             cfg['motion_record_duration'] = int(data.get('motion_record_duration', 10))
             cfg['storage_cleanup_days'] = int(data.get('storage_cleanup_days', 7))
             cfg['nanny_cam_enabled'] = data.get('nanny_cam_enabled', False)
+            cfg['storage_encrypt'] = data.get('storage_encrypt', cfg.get('storage_encrypt', False))
+            cfg['storage_encrypted_dir'] = data.get('storage_encrypted_dir', cfg.get('storage_encrypted_dir', 'recordings_encrypted'))
 
             # WiFi settings
             cfg['wifi_enabled'] = data.get('wifi_enabled', cfg.get('wifi_enabled', True))
@@ -1196,6 +1760,23 @@ network={{
             cfg['sms_api_url'] = data.get('sms_api_url', '')
             cfg['sms_api_key'] = data.get('sms_api_key', '')
             cfg['sms_rate_limit'] = int(data.get('sms_rate_limit', 5))
+
+            # Cloud sync configuration
+            cfg['gdrive_enabled'] = data.get('gdrive_enabled', cfg.get('gdrive_enabled', False))
+            cfg['gdrive_folder_id'] = data.get('gdrive_folder_id', cfg.get('gdrive_folder_id', ''))
+
+            # Security settings
+            security_cfg = _ensure_security_cfg(cfg)
+            security_cfg['tailscale_only'] = data.get('tailscale_only', security_cfg.get('tailscale_only', True))
+            security_cfg['share_links_enabled'] = data.get('share_links_enabled', security_cfg.get('share_links_enabled', True))
+            security_cfg['share_link_expiry_hours'] = int(data.get('share_link_expiry_hours', security_cfg.get('share_link_expiry_hours', 72)))
+            cfg['security'] = security_cfg
+
+            # Keep nested storage settings in sync for other modules
+            cfg.setdefault('storage', {})
+            cfg['storage']['retention_days'] = int(data.get('storage_cleanup_days', 7))
+            cfg['storage']['encrypt'] = cfg.get('storage_encrypt', False)
+            cfg['storage']['encrypted_dir'] = cfg.get('storage_encrypted_dir', 'recordings_encrypted')
             
             save_config(cfg)
             logger.info("[CONFIG] Settings updated")
@@ -1431,8 +2012,11 @@ network={{
                 
                 out.release()
                 
-                file_size = os.path.getsize(video_path) / (1024 * 1024)
-                logger.success(f"[MOTION] Video saved: {video_filename} ({file_size:.1f}MB, {len(frames_list)} frames)")
+                cfg = get_config()
+                final_path, encrypted = _encrypt_clip_if_enabled(video_path, cfg)
+                final_name = os.path.basename(final_path)
+                file_size = os.path.getsize(final_path) / (1024 * 1024)
+                logger.success(f"[MOTION] Video saved: {final_name} ({file_size:.1f}MB, {len(frames_list)} frames)")
                 
                 # Update motion event with video path
                 try:
@@ -1446,13 +2030,21 @@ network={{
                         for event in events:
                             if event.get('id') == event_id:
                                 event['has_video'] = True
-                                event['video_path'] = video_filename
+                                event['video_path'] = final_name
                                 if 'details' not in event:
                                     event['details'] = {}
-                                event['details']['video_path'] = video_filename
+                                event['details']['video_path'] = final_name
                                 event['details']['mode'] = 'lite'
+                                event['details']['encrypted'] = encrypted
+                                upload_id = _queue_cloud_upload(final_path, meta={
+                                    "event_id": event_id,
+                                    "type": event.get("type"),
+                                    "timestamp": event.get("timestamp")
+                                })
+                                if upload_id:
+                                    event['details']['cloud_upload_id'] = upload_id
                                 updated = True
-                                logger.info(f"[MOTION] Updated event {event_id} with video: {video_filename}")
+                                logger.info(f"[MOTION] Updated event {event_id} with video: {final_name}")
                                 break
                         
                         if updated:
@@ -1655,12 +2247,33 @@ network={{
                                         details={
                                             "mode": "lite",
                                             "video_path": video_path,
+                                            "encrypted": bool(video_path and str(video_path).endswith('.enc')),
                                             "mean_diff": float(mean_diff),
                                             "max_diff": float(max_diff),
                                             "label": detected_label,
                                             "contours": len(allowed_labels)
                                         }
                                     )
+                                    try:
+                                        clip_path, _ = _resolve_clip_path(video_path, cfg)
+                                        upload_id = _queue_cloud_upload(clip_path, meta={
+                                            "event_id": event.get("id"),
+                                            "type": event.get("type"),
+                                            "timestamp": event.get("timestamp")
+                                        }) if clip_path else None
+                                        if upload_id:
+                                            events_path = os.path.join(BASE_DIR, "logs", "motion_events.json")
+                                            if os.path.exists(events_path):
+                                                with open(events_path, 'r') as f:
+                                                    events = json.load(f)
+                                                for evt in events:
+                                                    if evt.get('id') == event.get('id'):
+                                                        evt.setdefault('details', {})['cloud_upload_id'] = upload_id
+                                                        break
+                                                with open(events_path, 'w') as f:
+                                                    json.dump(events, f, indent=2)
+                                    except Exception as e:
+                                        logger.warning(f"[CLOUD] Auto upload queue failed: {e}")
                                     # If WiFi is down, remember this clip to sync/notify later
                                     if not is_wifi_connected():
                                         queue_offline_clip(video_path, {

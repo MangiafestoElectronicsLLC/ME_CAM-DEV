@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shared Clip - ME Camera</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #111;
+            color: #eee;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .card {
+            max-width: 900px;
+            margin: 0 auto;
+            background: #1b1b1b;
+            padding: 20px;
+            border-radius: 12px;
+        }
+
+        h2 {
+            margin-top: 0;
+        }
+
+        .meta {
+            color: #aaa;
+            font-size: 13px;
+            margin-bottom: 12px;
+        }
+
+        .actions a {
+            display: inline-block;
+            margin-right: 10px;
+            background: #667eea;
+            color: #fff;
+            padding: 8px 14px;
+            border-radius: 6px;
+            text-decoration: none;
+        }
+
+        .actions a.secondary {
+            background: #607d8b;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="card">
+        <h2>🔗 Shared Clip</h2>
+        <div class="meta">File: {{ filename }}{% if encrypted %} (encrypted at rest){% endif %}</div>
+        <video width="100%" controls preload="metadata">
+            <source src="/share/{{ token }}/stream" type="video/mp4">
+        </video>
+        <div class="actions" style="margin-top: 12px;">
+            <a href="/share/{{ token }}/download">Download</a>
+            <a href="/" class="secondary">Back to Dashboard</a>
+        </div>
+    </div>
+</body>
+
+</html>

@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Clips Library - ME Camera</title>
+    <link rel="stylesheet" href="/static/lite.css">
+    <style>
+        .clips-container {
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .clips-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        .clips-header a {
+            text-decoration: none;
+        }
+
+        .logout-btn {
+            background: #333;
+            color: #fff;
+            padding: 8px 14px;
+            border-radius: 6px;
+            text-decoration: none;
+            font-size: 13px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: #fff;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        th,
+        td {
+            padding: 12px 14px;
+            border-bottom: 1px solid #eee;
+            font-size: 14px;
+        }
+
+        th {
+            text-align: left;
+            background: #f7f7f7;
+        }
+
+        .badge {
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+        }
+
+        .badge.enc {
+            background: #ffe0b2;
+            color: #e65100;
+        }
+
+        .actions button {
+            margin-right: 8px;
+        }
+
+        .player {
+            margin-top: 18px;
+            background: #fff;
+            padding: 12px;
+            border-radius: 10px;
+        }
+
+        .share-box {
+            margin-top: 10px;
+            padding: 8px;
+            background: #f5f5f5;
+            border-radius: 8px;
+            font-size: 13px;
+            display: none;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="clips-container">
+        <div class="clips-header">
+            <h2>📁 Clips Library</h2>
+            <div>
+                <a href="/" class="logout-btn" style="background:#667eea;color:#fff;">Dashboard</a>
+                <a href="/motion-events" class="logout-btn" style="background:#ff9800;color:#fff;">Events</a>
+                <a href="/config" class="logout-btn" style="background:#607d8b;color:#fff;">Config</a>
+            </div>
+        </div>
+
+        <div class="player">
+            <video id="clipPlayer" width="100%" controls preload="metadata"></video>
+            <div id="shareBox" class="share-box"></div>
+        </div>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>Clip</th>
+                    <th>Date</th>
+                    <th>Size</th>
+                    <th>Security</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% if clips|length == 0 %}
+                <tr>
+                    <td colspan="5">No clips found.</td>
+                </tr>
+                {% endif %}
+                {% for clip in clips %}
+                <tr>
+                    <td>{{ clip.name }}</td>
+                    <td>{{ clip.timestamp_str }}</td>
+                    <td>{{ clip.size_mb }} MB</td>
+                    <td>
+                        {% if clip.encrypted %}
+                        <span class="badge enc">Encrypted</span>
+                        {% else %}
+                        <span class="badge">Standard</span>
+                        {% endif %}
+                    </td>
+                    <td class="actions">
+                        <button onclick="viewClip('{{ clip.name }}')">View</button>
+                        <button onclick="downloadClip('{{ clip.name }}')">Download</button>
+                        {% if share_enabled %}
+                        <button onclick="shareClip('{{ clip.name }}')">Share</button>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        function viewClip(name) {
+            const player = document.getElementById('clipPlayer');
+            player.src = `/api/motion/video/${encodeURIComponent(name)}`;
+            player.play();
+        }
+
+        function downloadClip(name) {
+            window.location.href = `/api/motion/video/${encodeURIComponent(name)}/download`;
+        }
+
+        async function shareClip(name) {
+            const shareBox = document.getElementById('shareBox');
+            shareBox.style.display = 'none';
+            try {
+                const res = await fetch('/api/clips/share', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ filename: name })
+                });
+                const data = await res.json();
+                if (data.ok) {
+                    shareBox.textContent = `Share link (expires ${data.expires_at}): ${data.share_url}`;
+                    shareBox.style.display = 'block';
+                } else {
+                    shareBox.textContent = data.error || 'Share failed.';
+                    shareBox.style.display = 'block';
+                }
+            } catch (e) {
+                shareBox.textContent = e.message || 'Share failed.';
+                shareBox.style.display = 'block';
+            }
+        }
+    </script>
+</body>
+
+</html>

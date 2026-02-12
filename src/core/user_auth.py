@@ -9,16 +9,9 @@ def _ensure_users_file():
     """Create users file if it doesn't exist."""
     if not os.path.exists(USERS_FILE):
         os.makedirs(os.path.dirname(USERS_FILE), exist_ok=True)
-        default_users = {
-            "admin": {
-                "password_hash": generate_password_hash("admin123"),
-                "pin": "1234",
-                "role": "admin"
-            }
-        }
         with open(USERS_FILE, 'w') as f:
-            json.dump(default_users, f, indent=2)
-        logger.info("[AUTH] Created default admin user (username: admin, password: admin123)")
+            json.dump({}, f, indent=2)
+        logger.info("[AUTH] Created empty users file (admin will be set in first-run setup)")
 
 def get_users():
     """Load all users from file."""

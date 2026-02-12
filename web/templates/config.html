@@ -389,6 +389,18 @@
                     <div class="help-text">Delete recordings older than this many days to free up space</div>
                 </div>
 
+                <div class="form-group checkbox-group">
+                    <input type="checkbox" id="storage_encrypt" name="storage_encrypt" {% if
+                        config.get('storage_encrypt', False) %}checked{% endif %}>
+                    <label for="storage_encrypt" style="margin: 0; font-weight: 400;">Encrypt recordings at rest</label>
+                </div>
+                <div class="form-group">
+                    <label>Encrypted Storage Folder</label>
+                    <input type="text" name="storage_encrypted_dir"
+                        value="{{ config.get('storage_encrypted_dir', 'recordings_encrypted') }}">
+                    <div class="help-text">Encrypted clips are stored here (relative to project root)</div>
+                </div>
+
                 <button type="button" class="cleanup-button" onclick="cleanupOldRecordings()">
                     🗑️ Cleanup Old Recordings Now
                 </button>
@@ -396,6 +408,45 @@
             </div>
 
             <div class="divider"></div>
+
+            <!-- Cloud Sync -->
+            <div class="form-section">
+                <div class="section-title">☁️ Cloud Sync (Encrypted)</div>
+                <div class="form-group checkbox-group">
+                    <input type="checkbox" id="gdrive_enabled" name="gdrive_enabled" {% if config.get('gdrive_enabled',
+                        False) %}checked{% endif %}>
+                    <label for="gdrive_enabled" style="margin: 0; font-weight: 400;">Enable encrypted Google Drive
+                        uploads</label>
+                </div>
+                <div class="form-group">
+                    <label>Drive Folder ID (optional)</label>
+                    <input type="text" name="gdrive_folder_id" value="{{ config.get('gdrive_folder_id', '') }}">
+                    <div class="help-text">Leave empty for automatic date-based folders</div>
+                </div>
+            </div>
+
+            <div class="divider"></div>
+
+            <!-- Security -->
+            <div class="form-section">
+                <div class="section-title">🔒 Security</div>
+                <div class="form-group checkbox-group">
+                    <input type="checkbox" id="tailscale_only" name="tailscale_only" {% if config.get('security',
+                        {}).get('tailscale_only', true) %}checked{% endif %}>
+                    <label for="tailscale_only" style="margin: 0; font-weight: 400;">Tailscale-only access</label>
+                </div>
+                <div class="form-group checkbox-group">
+                    <input type="checkbox" id="share_links_enabled" name="share_links_enabled" {% if
+                        config.get('security', {}).get('share_links_enabled', true) %}checked{% endif %}>
+                    <label for="share_links_enabled" style="margin: 0; font-weight: 400;">Enable shareable clip
+                        links</label>
+                </div>
+                <div class="form-group">
+                    <label>Share Link Expiry (hours)</label>
+                    <input type="number" name="share_link_expiry_hours"
+                        value="{{ config.get('security', {}).get('share_link_expiry_hours', 72) }}" min="1" max="720">
+                </div>
+            </div>
 
             <!-- WiFi Settings (already added above, this is just positioning) -->
 
@@ -427,6 +478,13 @@
                 motion_record_enabled: document.getElementById('motion_record').checked,
                 motion_record_duration: parseInt(document.querySelector('input[name="motion_record_duration"]').value),
                 storage_cleanup_days: parseInt(document.querySelector('input[name="storage_cleanup_days"]').value),
+                storage_encrypt: document.getElementById('storage_encrypt').checked,
+                storage_encrypted_dir: document.querySelector('input[name="storage_encrypted_dir"]').value,
+                gdrive_enabled: document.getElementById('gdrive_enabled').checked,
+                gdrive_folder_id: document.querySelector('input[name="gdrive_folder_id"]').value,
+                tailscale_only: document.getElementById('tailscale_only').checked,
+                share_links_enabled: document.getElementById('share_links_enabled').checked,
+                share_link_expiry_hours: parseInt(document.querySelector('input[name="share_link_expiry_hours"]').value),
                 wifi_enabled: document.getElementById('wifi_enabled').checked,
                 wifi_ssid: document.querySelector('input[name="wifi_ssid"]').value,
                 wifi_password: document.querySelector('input[name="wifi_password"]').value,

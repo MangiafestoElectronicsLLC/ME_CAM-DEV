@@ -423,7 +423,7 @@
                 const formattedTime = formatTimestamp(event.timestamp);
                 // Check both old and new video_path locations
                 const videoPath = event.video_path || event.details?.video_path || null;
-                const isVideo = videoPath && (videoPath.endsWith('.mp4') || videoPath.endsWith('.h264'));
+                const isVideo = videoPath && (videoPath.endsWith('.mp4') || videoPath.endsWith('.h264') || videoPath.endsWith('.enc'));
                 // Build proper path for API endpoint
                 const fullPath = videoPath ? `/api/motion/video/${videoPath}` : null;
                 const videoButton = fullPath ?

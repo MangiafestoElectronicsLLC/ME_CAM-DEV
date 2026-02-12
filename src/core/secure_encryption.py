@@ -3,7 +3,7 @@ import os
 import json
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.backends import default_backend
 import base64
 from loguru import logger
@@ -24,7 +24,7 @@ class SecureEncryption:
         """Derive encryption key from password using PBKDF2"""
         try:
             salt = b"ME_CAM_SECURITY"  # Fixed salt for consistency
-            kdf = PBKDF2(
+            kdf = PBKDF2HMAC(
                 algorithm=hashes.SHA256(),
                 length=32,
                 salt=salt,

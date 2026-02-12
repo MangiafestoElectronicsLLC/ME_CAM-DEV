@@ -16,6 +16,10 @@
   "sms_api_url": "",
   "sms_api_key": "",
   "sms_rate_limit": 5,
+  "storage_encrypt": false,
+  "storage_encrypted_dir": "recordings_encrypted",
+  "gdrive_enabled": false,
+  "gdrive_folder_id": "",
   "owner_email": "",
   "security_contacts": [],
   "emergency_mode": "manual",
@@ -116,6 +120,16 @@
         "auth_token": ""
       }
     }
+  },
+  "security": {
+    "tailscale_only": true,
+    "share_links_enabled": true,
+    "share_link_expiry_hours": 72,
+    "session_timeout_minutes": 720,
+    "allow_localhost": true,
+    "allow_setup_without_vpn": true,
+    "secret_key": "",
+    "device_token": ""
   },
   "first_run_completed": false
 }
