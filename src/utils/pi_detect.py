@@ -209,14 +209,24 @@ def detect_camera_type() -> Optional[Dict]:
     """
     try:
         import subprocess
-        
-        # Try libcamera-hello to detect camera
-        result = subprocess.run(
-            ['libcamera-hello', '--list-cameras'],
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
+        import shutil
+
+        # Try rpicam-hello (Bookworm) then libcamera-hello (Bullseye)
+        camera_cmds = ['rpicam-hello', 'libcamera-hello']
+        result = None
+        for cmd in camera_cmds:
+            if shutil.which(cmd):
+                result = subprocess.run(
+                    [cmd, '--list-cameras'],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                break
+
+        if result is None:
+            logger.warning("[CAMERA_DETECT] libcamera apps not installed (rpicam-hello/libcamera-hello missing)")
+            return None
         
         output = result.stdout + result.stderr
         

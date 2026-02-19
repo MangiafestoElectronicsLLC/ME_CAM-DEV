@@ -1,9 +1,15 @@
 # Fresh SD Card to Working Camera - Simple Guide
 
 **Version:** ME_CAM v2.2.3  
-**Hardware:** Raspberry Pi Zero 2W + IMX519 Camera  
+**Hardware:** Raspberry Pi Zero 2W + IMX519 (I2C) or OV547 Camera  
 **Time:** 30 minutes total  
 **Method:** GitHub repository (proven stable on devices 1, 2, 3)
+
+**Device Notes:**
+- **Device 3:** IMX519 over I2C (use IMX519 overlay below)
+- **Device 4:** OV547 OmniVision (setup is the same flow as Device 6 with OV547 overlay)
+
+**Developer Note (Use This Doc):** This guide is the developer/installer workflow. The customer-facing guide is in CUSTOMER_INSTRUCTION_MANUAL.md.
 
 ---
 
@@ -11,7 +17,8 @@
 
 **Hardware:**
 - Raspberry Pi Zero 2W
-- IMX519 Camera Module (Arducam)
+- IMX519 Camera Module (I2C) for Device 3
+- OV547 Camera Module (OmniVision) for Device 4
 - MicroSD card (16GB+, 32GB recommended)
 - Power supply (5V 2.5A)
 - Camera ribbon cable
@@ -31,7 +38,9 @@ https://www.raspberrypi.com/software/
 1. Click **CHOOSE OS** → **Raspberry Pi OS (other)** → **Raspberry Pi OS Lite (32-bit)**
 2. Click **CHOOSE STORAGE** → Select your SD card
 3. Click **⚙️ Settings Icon**:
-   - ✅ Set hostname: `mecamdev6` (or your preferred name)
+    - ✅ Set hostname:
+       - Device 3: `mecamdev3`
+       - Device 4: `mecamdev4`
    - ✅ Enable SSH (password authentication)
    - ✅ Username: `pi`
    - ✅ Password: (your secure password)
@@ -55,11 +64,13 @@ https://www.raspberrypi.com/software/
 Find your Pi's IP address from your router, or use hostname:
 
 ```bash
-ssh pi@mecamdev6.local
+ssh pi@mecamdev3.local  # Device 3
+# or
+ssh pi@mecamdev4.local  # Device 4
 # Enter your password when prompted
 ```
 
-**Expected:** `pi@mecamdev6:~ $`
+**Expected:** `pi@mecamdev3:~ $` or `pi@mecamdev4:~ $`
 
 ---
 
@@ -111,12 +122,12 @@ mkdir -p config
 nano config/config.json
 ```
 
-**Paste this:**
+**Paste this (Device 3 example):**
 ```json
 {
     "first_run_completed": true,
-    "device_name": "ME_CAM_6",
-    "device_id": "pi-cam-006",
+   "device_name": "ME_CAM_3",
+   "device_id": "pi-cam-003",
     "resolution": "640x480",
     "framerate": 40,
     "motion_detection": true,
@@ -124,6 +135,22 @@ nano config/config.json
     "storage_limit_gb": 50,
     "auto_delete_old": true,
     "web_port": 8080
+}
+```
+
+**Paste this (Device 4 example):**
+```json
+{
+   "first_run_completed": true,
+   "device_name": "ME_CAM_4",
+   "device_id": "pi-cam-004",
+   "resolution": "640x480",
+   "framerate": 40,
+   "motion_detection": true,
+   "video_length": 30,
+   "storage_limit_gb": 50,
+   "auto_delete_old": true,
+   "web_port": 8080
 }
 ```
 
@@ -141,7 +168,13 @@ You should see:
 [FLASK] Starting on 0.0.0.0:8080
 ```
 
-**Test in browser:** `http://mecamdev6.local:8080`
+**Test in browser:** `http://mecamdev3.local:8080` or `http://mecamdev4.local:8080`
+
+**First Login Flow (Security):**
+1. Sign in with the temporary admin credentials you created during setup.
+2. You will be redirected to **/customer-setup** to create the customer account.
+3. The temporary admin account is removed automatically.
+4. All future logins must use the customer credentials.
 
 Press **Ctrl+C** to stop.
 
@@ -192,7 +225,7 @@ sudo journalctl -u mecamera -n 20
 ```
 
 ### 4.2 Test Dashboard
-Open browser: `http://mecamdev6.local:8080`
+Open browser: `http://mecamdev3.local:8080` or `http://mecamdev4.local:8080`
 
 **Expected:** Purple dashboard with live camera feed
 
@@ -201,13 +234,13 @@ Open browser: `http://mecamdev6.local:8080`
 sudo reboot
 ```
 
-Wait 2 minutes, then check: `http://mecamdev6.local:8080`
+Wait 2 minutes, then check: `http://mecamdev3.local:8080` or `http://mecamdev4.local:8080`
 
 ---
 
 ## ✅ Done!
 
-Your camera is working at: `http://mecamdev6.local:8080`
+Your camera is working at: `http://mecamdev3.local:8080` or `http://mecamdev4.local:8080`
 
 ---
 
@@ -249,11 +282,26 @@ hostname -I
 # Test camera:
 rpicam-jpeg -o test.jpg --width 640 --height 480
 
-# If fails, force IMX519 overlay:
+# If app says libcamera not installed:
+which rpicam-hello || which libcamera-hello
+sudo apt install -y libcamera-apps python3-picamera2
+
+# If fails, force IMX519 overlay (Device 3, I2C):
 sudo nano /boot/firmware/config.txt
 # Add under [all]:
 camera_auto_detect=0
 dtoverlay=imx519
+gpu_mem=128
+
+sudo reboot
+```
+
+**Device 4 (OV547 OmniVision) overlay:**
+```bash
+sudo nano /boot/firmware/config.txt
+# Add under [all]:
+camera_auto_detect=0
+dtoverlay=ov547
 gpu_mem=128
 
 sudo reboot

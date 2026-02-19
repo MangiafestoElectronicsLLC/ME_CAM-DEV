@@ -91,13 +91,14 @@ else:
 # PHASE 3: Enhanced Motion & Notification Systems
 # ============================================================================
 
-from src.core.motion_logger import get_motion_logger, cleanup_on_startup
+from src.core.motion_logger import cleanup_on_startup, log_motion_event
 from src.core.notification_queue import get_notification_queue
 from src.detection import motion_service
 from src.core import get_sms_notifier
 
 logger.info(f"\n[MOTION] Initializing motion detection system...")
-motion_logger = get_motion_logger()
+# Initialize motion logging via cleanup on startup
+cleanup_on_startup()
 notification_queue = get_notification_queue()
 
 logger.success(f"[MOTION] ✓ Motion logger initialized (debouncing enabled)")

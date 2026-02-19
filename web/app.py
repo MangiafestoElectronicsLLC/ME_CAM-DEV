@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
 # Import from organized structure
 from src.core import (
     get_config, save_config, is_first_run, mark_first_run_complete,
-    authenticate, create_user, user_exists, get_user,
+    authenticate, create_user, user_exists, get_user, delete_user,
     BatteryMonitor, extract_thumbnail, generate_setup_qr,
     log_motion_event, get_recent_events, get_event_statistics, export_events_csv,
     get_sms_notifier
@@ -299,9 +299,28 @@ def setup():
         cfg["detection"]["sensitivity"] = float(request.form.get("sensitivity") or 0.6)
         cfg["emergency_phone"] = request.form.get("emergency_phone", "")
         save_config(cfg)
+
+        admin_username = request.form.get("admin_username", "").strip()
+        admin_password = request.form.get("admin_password", "")
+        admin_password_confirm = request.form.get("admin_password_confirm", "")
+
+        if not admin_username or len(admin_username) < 3:
+            return render_template("first_run.html", config=cfg, qr_code=generate_setup_qr("raspberrypi"), setup_url="http://raspberrypi.local:8080/setup", error="Admin username must be at least 3 characters")
+        if not admin_password or len(admin_password) < 8:
+            return render_template("first_run.html", config=cfg, qr_code=generate_setup_qr("raspberrypi"), setup_url="http://raspberrypi.local:8080/setup", error="Admin password must be at least 8 characters")
+        if admin_password != admin_password_confirm:
+            return render_template("first_run.html", config=cfg, qr_code=generate_setup_qr("raspberrypi"), setup_url="http://raspberrypi.local:8080/setup", error="Admin passwords do not match")
+
+        if not create_user(admin_username, admin_password):
+            return render_template("first_run.html", config=cfg, qr_code=generate_setup_qr("raspberrypi"), setup_url="http://raspberrypi.local:8080/setup", error="Failed to create admin user")
+
+        cfg["bootstrap_required"] = True
+        cfg["bootstrap_admin"] = admin_username
+        save_config(cfg)
+
         mark_first_run_complete()
         logger.info("[SETUP] First run completed.")
-        return redirect(url_for("index"))
+        return redirect(url_for("login"))
     
     cfg = get_config()
     
@@ -316,19 +335,74 @@ def login():
     if request.method == "POST":
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
+
+        cfg = get_config()
+        bootstrap_required = cfg.get("bootstrap_required", False)
+        bootstrap_admin = cfg.get("bootstrap_admin", "admin")
         
         if authenticate(username, password):
+            if bootstrap_required and username != bootstrap_admin:
+                return render_template("login.html", error="Initial setup requires the admin account. Please sign in as admin to create the customer account.")
             session["authenticated"] = True
             session["username"] = username
             logger.info(f"[AUTH] User {username} logged in")
+            if bootstrap_required and username == bootstrap_admin:
+                return redirect(url_for("customer_setup"))
             return redirect(url_for("index"))
         else:
             return render_template("login.html", error="Invalid username or password")
     
     return render_template("login.html")
 
+@app.route("/customer-setup", methods=["GET", "POST"])
+def customer_setup():
+    if not require_auth():
+        return redirect(url_for("login"))
+
+    cfg = get_config()
+    if not cfg.get("bootstrap_required"):
+        return redirect(url_for("index"))
+
+    bootstrap_admin = cfg.get("bootstrap_admin", "admin")
+    if session.get("username") != bootstrap_admin:
+        return redirect(url_for("login"))
+
+    if request.method == "POST":
+        customer_username = request.form.get("customer_username", "").strip()
+        customer_password = request.form.get("customer_password", "")
+        customer_password_confirm = request.form.get("customer_password_confirm", "")
+
+        if not customer_username or len(customer_username) < 3:
+            return render_template("customer_setup.html", error="Username must be at least 3 characters")
+        if customer_username == bootstrap_admin:
+            return render_template("customer_setup.html", error="Customer username must be different from admin")
+        if not customer_password or len(customer_password) < 8:
+            return render_template("customer_setup.html", error="Password must be at least 8 characters")
+        if customer_password != customer_password_confirm:
+            return render_template("customer_setup.html", error="Passwords do not match")
+
+        if user_exists(customer_username):
+            return render_template("customer_setup.html", error="Username already exists")
+        if not create_user(customer_username, customer_password):
+            return render_template("customer_setup.html", error="Failed to create customer account")
+
+        if not delete_user(bootstrap_admin):
+            return render_template("customer_setup.html", error="Customer created, but failed to remove admin. Please retry.")
+
+        cfg["bootstrap_required"] = False
+        cfg["bootstrap_admin"] = ""
+        save_config(cfg)
+
+        session["username"] = customer_username
+        return redirect(url_for("index"))
+
+    return render_template("customer_setup.html")
+
 @app.route("/register", methods=["GET", "POST"])
 def register():
+    cfg = get_config()
+    if cfg.get("bootstrap_required"):
+        return render_template("register.html", error="Registration is disabled until the customer account is created by admin.")
     if request.method == "POST":
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
@@ -364,6 +438,10 @@ def require_auth():
 def index():
     if not require_auth():
         return redirect(url_for("login"))
+
+    cfg = get_config()
+    if cfg.get("bootstrap_required") and session.get("username") == cfg.get("bootstrap_admin", "admin"):
+        return redirect(url_for("customer_setup"))
     
     # Start motion detection service if not already running (with camera coordination)
     if motion_service and not motion_service.running:

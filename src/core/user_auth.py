@@ -63,6 +63,15 @@ def create_user(username, password, pin="1234"):
     }
     return save_users(users)
 
+def delete_user(username):
+    """Delete user account."""
+    users = get_users()
+    if username not in users:
+        logger.warning(f"[AUTH] User {username} not found for delete")
+        return False
+    users.pop(username, None)
+    return save_users(users)
+
 def change_password(username, old_password, new_password):
     """Change user password."""
     if not authenticate(username, old_password):

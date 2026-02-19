@@ -547,8 +547,11 @@ def create_lite_app(pi_model, camera_config):
         
         if 'user' not in session:
             return redirect(url_for('login'))
-        
+
         cfg = get_config()
+        if cfg.get('bootstrap_required') and session.get('user') == cfg.get('bootstrap_admin', 'admin'):
+            return redirect(url_for('customer_setup'))
+
         storage = get_storage_info()
         battery_status = battery.get_status()
         motion_events = get_motion_events()
@@ -571,18 +574,75 @@ def create_lite_app(pi_model, camera_config):
         if request.method == "POST":
             username = request.form.get("username")
             password = request.form.get("password")
+
+            cfg = get_config()
+            bootstrap_required = cfg.get('bootstrap_required', False)
+            bootstrap_admin = cfg.get('bootstrap_admin', 'admin')
             
             if authenticate(username, password):
+                if bootstrap_required and username != bootstrap_admin:
+                    return render_template('login.html', error="Initial setup requires the admin account. Please sign in as admin to create the customer account.")
                 session['user'] = username
+                if bootstrap_required and username == bootstrap_admin:
+                    return redirect(url_for('customer_setup'))
                 return redirect(url_for('index'))
             else:
                 return render_template('login.html', error="Invalid credentials")
         
         return render_template('login.html')
+
+    @app.route("/customer-setup", methods=["GET", "POST"])
+    def customer_setup():
+        """Create customer account and remove bootstrap admin"""
+        if 'user' not in session:
+            return redirect(url_for('login'))
+
+        cfg = get_config()
+        if not cfg.get('bootstrap_required'):
+            return redirect(url_for('index'))
+
+        bootstrap_admin = cfg.get('bootstrap_admin', 'admin')
+        if session.get('user') != bootstrap_admin:
+            return redirect(url_for('login'))
+
+        if request.method == "POST":
+            customer_username = request.form.get("customer_username", "").strip()
+            customer_password = request.form.get("customer_password", "")
+            customer_password_confirm = request.form.get("customer_password_confirm", "")
+
+            if not customer_username or len(customer_username) < 3:
+                return render_template('customer_setup.html', error="Username must be at least 3 characters")
+            if customer_username == bootstrap_admin:
+                return render_template('customer_setup.html', error="Customer username must be different from admin")
+            if not customer_password or len(customer_password) < 8:
+                return render_template('customer_setup.html', error="Password must be at least 8 characters")
+            if customer_password != customer_password_confirm:
+                return render_template('customer_setup.html', error="Passwords do not match")
+
+            from src.core import create_user, delete_user, user_exists
+            if user_exists(customer_username):
+                return render_template('customer_setup.html', error="Username already exists")
+            if not create_user(customer_username, customer_password):
+                return render_template('customer_setup.html', error="Failed to create customer account")
+
+            if not delete_user(bootstrap_admin):
+                return render_template('customer_setup.html', error="Customer created, but failed to remove admin. Please retry.")
+
+            cfg['bootstrap_required'] = False
+            cfg['bootstrap_admin'] = ""
+            save_config(cfg)
+
+            session['user'] = customer_username
+            return redirect(url_for('index'))
+
+        return render_template('customer_setup.html')
     
     @app.route("/register", methods=["GET", "POST"])
     def register():
         """User registration"""
+        cfg = get_config()
+        if cfg.get('bootstrap_required'):
+            return render_template("register.html", error="Registration is disabled until the customer account is created by admin.")
         if request.method == "POST":
             username = request.form.get("username", "").strip()
             password = request.form.get("password", "")
@@ -647,6 +707,10 @@ def create_lite_app(pi_model, camera_config):
             
             from src.core import create_user
             create_user('admin', 'admin123')
+
+            cfg['bootstrap_required'] = True
+            cfg['bootstrap_admin'] = 'admin'
+            save_config(cfg)
             
             mark_first_run_complete()
             return redirect(url_for('login'))
