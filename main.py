@@ -91,7 +91,7 @@ else:
 # PHASE 3: Enhanced Motion & Notification Systems
 # ============================================================================
 
-from src.core.motion_logger import cleanup_on_startup, log_motion_event
+from src.core.motion_logger import cleanup_on_startup, log_motion_event, get_event_statistics
 from src.core.notification_queue import get_notification_queue
 from src.detection import motion_service
 from src.core import get_sms_notifier
@@ -154,11 +154,11 @@ if __name__ == "__main__":
     update_thread.start()
     
     # Log motion statistics
-    motion_stats = motion_logger.get_statistics()
+    motion_stats = get_event_statistics()
     logger.info(f"\n[MOTION] Statistics:")
-    logger.info(f"  Total events: {motion_stats['total']}")
-    logger.info(f"  Today: {motion_stats['today']}")
-    logger.info(f"  With video: {motion_stats['with_video']}")
+    logger.info(f"  Total events: {motion_stats.get('total_events', 0)}")
+    logger.info(f"  Today: {motion_stats.get('today_count', 0)}")
+    logger.info(f"  With video: {motion_stats.get('with_video', 0)}")
     
     # Display camera configuration
     if use_lite:

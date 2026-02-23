@@ -1,30 +1,122 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=5.0">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#1f1f1f">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="description" content="ME Camera Security System Dashboard">
+    <meta name="robots" content="noindex, nofollow">
+
     <title>ME Camera</title>
+
+    <!-- Stylesheets -->
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='responsive.css') }}">
+
+    <!-- CSRF Token for forms -->
+    <script>
+        const csrfToken = "{{ session.get('csrf_token', '') }}";
+    </script>
+
+    <style>
+        /* Loading animation */
+        .spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: #2979ff;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        /* Skip to main content (accessibility) */
+        .skip-to-main {
+            position: absolute;
+            top: -40px;
+            left: 0;
+            background: #2979ff;
+            color: white;
+            padding: 8px 16px;
+            text-decoration: none;
+            z-index: 100;
+        }
+
+        .skip-to-main:focus {
+            top: 0;
+        }
+    </style>
 </head>
+
 <body>
-<nav class="navbar">
-    <span class="brand">ME Camera</span>
-    {% if session.get('logged_in') %}
-    <a href="{{ url_for('index') }}">Dashboard</a>
-    <a href="{{ url_for('config_page') }}">Config</a>
-    <a href="{{ url_for('logout') }}">Logout</a>
-    {% endif %}
-</nav>
-<div class="container">
-    {% with messages = get_flashed_messages() %}
-    {% if messages %}
-    <ul class="flash">
-        {% for m in messages %}
-        <li>{{ m }}</li>
-        {% endfor %}
-    </ul>
-    {% endif %}
-    {% endwith %}
-    {% block content %}{% endblock %}
-</div>
+    <!-- Accessibility: Skip to main content -->
+    <a href="#main-content" class="skip-to-main">Skip to main content</a>
+
+    <nav class="navbar" role="navigation" aria-label="Main navigation">
+        <span class="brand">📹 ME Camera</span>
+        {% if session.get('logged_in') %}
+        <div class="nav-menu" id="navMenu">
+            <a href="{{ url_for('index') }}" aria-label="Dashboard">Dashboard</a>
+            <a href="{{ url_for('config_page') }}" aria-label="Configuration">Config</a>
+            <a href="{{ url_for('logout') }}" aria-label="Logout">Logout</a>
+        </div>
+        <button class="nav-toggle" id="navToggle" aria-label="Toggle navigation menu">☰</button>
+        {% endif %}
+    </nav>
+
+    <main id="main-content" class="container" role="main">
+        {% with messages = get_flashed_messages() %}
+        {% if messages %}
+        <div class="flash-messages" role="alert">
+            {% for m in messages %}
+            <div class="flash-item">{{ m }}</div>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% endwith %}
+
+        {% block content %}{% endblock %}
+    </main>
+
+    <script>
+        // Mobile menu toggle
+        const navToggle = document.getElementById('navToggle');
+        const navMenu = document.getElementById('navMenu');
+
+        if (navToggle && navMenu) {
+            navToggle.addEventListener('click', () => {
+                navMenu.classList.toggle('active');
+            });
+
+            // Close menu when link is clicked
+            navMenu.querySelectorAll('a').forEach(link => {
+                link.addEventListener('click', () => {
+                    navMenu.classList.remove('active');
+                });
+            });
+        }
+
+        // Add CSRF token to all form submissions
+        document.querySelectorAll('form').forEach(form => {
+            if (!form.querySelector('input[name="csrf_token"]')) {
+                const tokenInput = document.createElement('input');
+                tokenInput.type = 'hidden';
+                tokenInput.name = 'csrf_token';
+                tokenInput.value = csrfToken;
+                form.appendChild(tokenInput);
+            }
+        });
+    </script>
 </body>
+
 </html>

@@ -1,0 +1,17 @@
+[Unit]
+Description=ME_CAM Security Camera
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/ME_CAM-DEV
+Environment=PATH=/home/pi/ME_CAM-DEV/venv/bin:/usr/bin:/bin
+ExecStart=/home/pi/ME_CAM-DEV/venv/bin/python3 /home/pi/ME_CAM-DEV/main.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

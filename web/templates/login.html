@@ -1,23 +1,45 @@
-<!doctype html>
-<html>
+<!DOCTYPE html>
+<html lang="en">
 
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=5.0">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#1f1f1f">
     <title>ME Camera - Login</title>
     <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/responsive.css">
     <style>
+        .login-page {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            padding: max(var(--spacing-md), env(safe-area-inset-left)) max(var(--spacing-md), env(safe-area-inset-right)) max(var(--spacing-md), env(safe-area-inset-bottom)) max(var(--spacing-md), env(safe-area-inset-top));
+        }
+
         .login-container {
+            width: 100%;
             max-width: 400px;
-            margin: 60px auto;
-            background: #1a1a1a;
-            padding: 40px;
+            background: linear-gradient(135deg, #1a1a1a 0%, #262626 100%);
+            padding: 30px;
             border-radius: 12px;
             border: 1px solid #333;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+        }
+
+        @media (max-width: 479px) {
+            .login-container {
+                max-width: 100%;
+                padding: 20px;
+            }
         }
 
         .login-container h1 {
             color: #2979ff;
             margin-bottom: 10px;
             text-align: center;
+            font-size: 28px;
         }
 
         .login-container p {
@@ -36,6 +58,7 @@
             color: #e0e0e0;
             margin-bottom: 8px;
             font-weight: bold;
+            font-size: 14px;
         }
 
         .form-group input {
@@ -47,12 +70,19 @@
             color: #e0e0e0;
             font-size: 16px;
             box-sizing: border-box;
+            transition: all 0.3s;
         }
 
         .form-group input:focus {
             outline: none;
             border-color: #2979ff;
             background: #1a1a1a;
+            box-shadow: 0 0 8px rgba(41, 121, 255, 0.3);
+        }
+
+        .form-group input:-webkit-autofill {
+            -webkit-box-shadow: 0 0 0 1000px #0f0f0f inset !important;
+            -webkit-text-fill-color: #e0e0e0 !important;
         }
 
         .btn-login {
@@ -66,10 +96,23 @@
             font-weight: bold;
             cursor: pointer;
             margin-top: 10px;
+            transition: all 0.3s;
+            min-height: 44px;
         }
 
         .btn-login:hover {
             background: linear-gradient(135deg, #1565c0, #0d47a1);
+            transform: translateY(-2px);
+            box-shadow: 0 8px 16px rgba(41, 121, 255, 0.3);
+        }
+
+        .btn-login:active {
+            transform: translateY(0);
+        }
+
+        .btn-login:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
         }
 
         .error {
@@ -79,6 +122,7 @@
             padding: 12px;
             border-radius: 6px;
             margin-bottom: 20px;
+            font-size: 14px;
         }
 
         .success {
@@ -88,6 +132,7 @@
             padding: 12px;
             border-radius: 6px;
             margin-bottom: 20px;
+            font-size: 14px;
         }
 
         .signup-link {
@@ -101,12 +146,124 @@
         .signup-link a {
             color: #2979ff;
             text-decoration: none;
+            font-weight: bold;
         }
 
         .signup-link a:hover {
             text-decoration: underline;
         }
+
+        .login-info {
+            background: rgba(41, 121, 255, 0.05);
+            border: 1px solid rgba(41, 121, 255, 0.2);
+            padding: 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            color: #999;
+            margin-bottom: 20px;
+        }
+
+        @media (max-width: 479px) {
+            .login-container h1 {
+                font-size: 24px;
+            }
+
+            .login-container p {
+                font-size: 13px;
+            }
+
+            .form-group label {
+                font-size: 13px;
+            }
+
+            .btn-login {
+                font-size: 14px;
+                padding: 14px;
+            }
+        }
     </style>
+</head>
+
+<body>
+    <div class="login-page">
+        <div class="login-container">
+            <h1>🔐 ME Camera</h1>
+            <p>Security System Login</p>
+
+            {% if error %}
+            <div class="error" role="alert">{{ error }}</div>
+            {% endif %}
+
+            {% if success %}
+            <div class="success" role="status">{{ success }}</div>
+            {% endif %}
+
+            <div class="login-info">
+                💡 This is your local, encrypted security system. All data is stored on your device.
+            </div>
+
+            <form method="POST" action="{{ url_for('login') }}" id="loginForm">
+                <div class="form-group">
+                    <label for="username">Username</label>
+                    <input type="text" id="username" name="username" required autocomplete="username"
+                        aria-label="Username" minlength="3">
+                </div>
+
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" name="password" required autocomplete="current-password"
+                        aria-label="Password" minlength="6">
+                </div>
+
+                <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token', '') }}">
+
+                <button type="submit" class="btn-login" id="loginBtn">
+                    <span id="btnText">Sign In</span>
+                </button>
+            </form>
+
+            <div class="signup-link">
+                Don't have an account? <a href="{{ url_for('register') }}">Create one</a>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Prevent multiple submissions
+        const loginForm = document.getElementById('loginForm');
+        const loginBtn = document.getElementById('loginBtn');
+        const btnText = document.getElementById('btnText');
+
+        loginForm.addEventListener('submit', function (e) {
+            loginBtn.disabled = true;
+            btnText.textContent = 'Signing in...';
+        });
+
+        // Re-enable button if there's an error
+        if (document.querySelector('.error')) {
+            loginBtn.disabled = false;
+            btnText.textContent = 'Sign In';
+        }
+
+        // Password visibility toggle (optional)
+        const passwordInput = document.getElementById('password');
+        const togglePassword = () => {
+            passwordInput.type = passwordInput.type === 'password' ? 'text' : 'password';
+        };
+    </script>
+</body>
+
+</html>
+
+.signup-link a {
+color: #2979ff;
+text-decoration: none;
+}
+
+.signup-link a:hover {
+text-decoration: underline;
+}
+</style>
 </head>
 
 <body>

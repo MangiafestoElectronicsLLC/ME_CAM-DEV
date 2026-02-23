@@ -1,0 +1,642 @@
+/* ============================================================
+   ME_CAM Responsive Design System v2.3.0
+   Optimized for Mobile, Tablet, Desktop, and Large Screens
+   ============================================================ */
+
+:root {
+    /* Breakpoints for responsive design */
+    --breakpoint-xs: 320px;
+    /* Small phones */
+    --breakpoint-sm: 480px;
+    /* Phones */
+    --breakpoint-md: 768px;
+    /* Tablets */
+    --breakpoint-lg: 1024px;
+    /* Large tablets */
+    --breakpoint-xl: 1280px;
+    /* Desktop */
+    --breakpoint-2xl: 1920px;
+    /* Large desktop */
+
+    /* Safe area for notched devices */
+    --safe-area-inset-left: env(safe-area-inset-left, 0);
+    --safe-area-inset-right: env(safe-area-inset-right, 0);
+    --safe-area-inset-top: env(safe-area-inset-top, 0);
+    --safe-area-inset-bottom: env(safe-area-inset-bottom, 0);
+
+    /* Responsive spacing */
+    --spacing-xs: 4px;
+    --spacing-sm: 8px;
+    --spacing-md: 12px;
+    --spacing-lg: 16px;
+    --spacing-xl: 20px;
+    --spacing-2xl: 24px;
+}
+
+/* ============================================================
+   MOBILE PHONES (< 480px) - PRIMARY FOCUS
+   ============================================================ */
+
+@media screen and (max-width: 479px) {
+    * {
+        -webkit-tap-highlight-color: transparent;
+    }
+
+    html,
+    body {
+        width: 100vw;
+        overflow-x: hidden;
+    }
+
+    .container {
+        padding: max(var(--spacing-sm), var(--safe-area-inset-left)) max(var(--spacing-sm), var(--safe-area-inset-right)) max(var(--spacing-sm), var(--safe-area-inset-bottom)) max(var(--spacing-sm), var(--safe-area-inset-top));
+        max-width: 100%;
+    }
+
+    /* Navbar */
+    .navbar {
+        padding: max(var(--spacing-md), var(--safe-area-inset-top)) max(var(--spacing-md), var(--safe-area-inset-right)) var(--spacing-md) max(var(--spacing-md), var(--safe-area-inset-left));
+        flex-wrap: wrap;
+        gap: var(--spacing-md);
+    }
+
+    .navbar .brand {
+        font-size: 16px;
+        flex: 1;
+        min-width: 120px;
+    }
+
+    .nav-toggle {
+        display: inline-flex !important;
+        width: 40px;
+        height: 40px;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .nav-menu {
+        display: none;
+        width: 100%;
+        flex-direction: column;
+        gap: var(--spacing-sm);
+    }
+
+    .nav-menu.active {
+        display: flex;
+    }
+
+    .nav-menu a {
+        padding: var(--spacing-md) var(--spacing-lg);
+        font-size: 13px;
+        white-space: normal;
+    }
+
+    /* Dashboard Header */
+    .dashboard-header {
+        padding: var(--spacing-lg);
+        flex-direction: column;
+        gap: var(--spacing-md);
+    }
+
+    .dashboard-header h1 {
+        font-size: 24px;
+    }
+
+    .header-left,
+    .header-right {
+        width: 100%;
+    }
+
+    .header-right {
+        flex-wrap: wrap;
+        gap: var(--spacing-md);
+        justify-content: space-between;
+    }
+
+    /* Status Pills */
+    .status-pill {
+        font-size: 11px;
+        padding: 6px 12px;
+    }
+
+    /* Quick Stats */
+    .quick-stats {
+        grid-template-columns: repeat(2, 1fr);
+        gap: var(--spacing-md);
+        margin-bottom: var(--spacing-lg);
+    }
+
+    .quick-stat {
+        padding: var(--spacing-md);
+        font-size: 12px;
+    }
+
+    .quick-stat-label {
+        font-size: 10px;
+    }
+
+    .quick-stat-value {
+        font-size: 16px;
+    }
+
+    /* Status Grid */
+    .status-grid {
+        grid-template-columns: 1fr;
+        gap: var(--spacing-md);
+    }
+
+    .status-card {
+        padding: var(--spacing-lg);
+    }
+
+    .status-card-label {
+        font-size: 11px;
+    }
+
+    .status-card-value {
+        font-size: 24px;
+    }
+
+    /* Camera Section */
+    .camera-section {
+        margin-bottom: var(--spacing-xl);
+    }
+
+    .camera-header {
+        flex-direction: column;
+        gap: var(--spacing-md);
+        margin-bottom: var(--spacing-md);
+    }
+
+    .camera-header h2 {
+        font-size: 18px;
+        margin: 0;
+    }
+
+    .camera-controls {
+        width: 100%;
+        gap: var(--spacing-sm);
+        flex-wrap: wrap;
+    }
+
+    .camera-controls select,
+    .camera-controls button {
+        flex: 1;
+        min-width: 40px;
+        font-size: 12px;
+        padding: 8px 10px;
+    }
+
+    .camera-feed-container {
+        max-height: 50vh;
+        border-radius: 8px;
+        overflow: hidden;
+    }
+
+    /* Buttons */
+    button,
+    .btn-small,
+    .btn-emergency {
+        font-size: 13px;
+        padding: var(--spacing-md) var(--spacing-lg);
+        min-height: 40px;
+        width: 100%;
+        margin-bottom: var(--spacing-sm);
+    }
+
+    .btn-small {
+        width: auto;
+        padding: var(--spacing-md) var(--spacing-lg);
+    }
+
+    /* Forms */
+    input,
+    select,
+    textarea {
+        font-size: 16px !important;
+        /* Prevent zoom on iOS */
+        padding: var(--spacing-md) var(--spacing-lg) !important;
+        width: 100%;
+    }
+
+    .form-group {
+        margin-bottom: var(--spacing-lg);
+    }
+
+    /* Text sizes */
+    h1 {
+        font-size: 24px;
+    }
+
+    h2 {
+        font-size: 20px;
+    }
+
+    h3 {
+        font-size: 18px;
+    }
+
+    p {
+        font-size: 14px;
+    }
+
+    /* Tables */
+    table {
+        font-size: 12px;
+    }
+
+    th,
+    td {
+        padding: var(--spacing-md);
+    }
+}
+
+/* ============================================================
+   SMALL PHONES & LANDSCAPE (480px - 768px)
+   ============================================================ */
+
+@media screen and (min-width: 480px) and (max-width: 767px) {
+    .container {
+        padding: var(--spacing-lg);
+        max-width: 100%;
+    }
+
+    .navbar {
+        padding: var(--spacing-lg);
+        gap: var(--spacing-lg);
+    }
+
+    .navbar .brand {
+        font-size: 18px;
+    }
+
+    .nav-toggle {
+        display: inline-flex !important;
+    }
+
+    .nav-menu {
+        display: none;
+        width: 100%;
+        flex-direction: column;
+        gap: var(--spacing-md);
+    }
+
+    .nav-menu.active {
+        display: flex;
+    }
+
+    /* Dashboard Header */
+    .dashboard-header {
+        padding: var(--spacing-xl);
+        flex-direction: column;
+    }
+
+    .dashboard-header h1 {
+        font-size: 28px;
+    }
+
+    .header-right {
+        width: 100%;
+        flex-wrap: wrap;
+    }
+
+    /* Quick Stats */
+    .quick-stats {
+        grid-template-columns: repeat(2, 1fr);
+        gap: var(--spacing-lg);
+    }
+
+    /* Status Grid */
+    .status-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: var(--spacing-lg);
+    }
+
+    .camera-feed-container {
+        max-height: 55vh;
+    }
+
+    button {
+        font-size: 14px;
+    }
+}
+
+/* ============================================================
+   TABLETS (768px - 1024px)
+   ============================================================ */
+
+@media screen and (min-width: 768px) and (max-width: 1023px) {
+    .container {
+        padding: var(--spacing-xl);
+        max-width: 100%;
+    }
+
+    .navbar {
+        padding: var(--spacing-lg) var(--spacing-xl);
+        flex-wrap: nowrap;
+        gap: var(--spacing-xl);
+    }
+
+    .navbar .brand {
+        font-size: 20px;
+    }
+
+    .nav-toggle {
+        display: none !important;
+    }
+
+    .nav-menu {
+        display: flex !important;
+        width: auto;
+        flex-direction: row;
+        gap: var(--spacing-lg);
+        margin-left: auto;
+    }
+
+    /* Dashboard Header */
+    .dashboard-header {
+        padding: var(--spacing-xl) var(--spacing-2xl);
+        flex-direction: row;
+    }
+
+    .dashboard-header h1 {
+        font-size: 30px;
+    }
+
+    .header-right {
+        align-items: flex-start;
+    }
+
+    /* Quick Stats */
+    .quick-stats {
+        grid-template-columns: repeat(4, 1fr);
+        gap: var(--spacing-lg);
+    }
+
+    .quick-stat {
+        padding: var(--spacing-lg);
+    }
+
+    /* Status Grid */
+    .status-grid {
+        grid-template-columns: repeat(3, 1fr);
+        gap: var(--spacing-lg);
+    }
+
+    .camera-feed-container {
+        max-height: 60vh;
+    }
+
+    button {
+        font-size: 14px;
+    }
+}
+
+/* ============================================================
+   LARGE TABLETS / SMALL DESKTOP (1024px - 1280px)
+   ============================================================ */
+
+@media screen and (min-width: 1024px) and (max-width: 1279px) {
+    .container {
+        padding: var(--spacing-xl) var(--spacing-2xl);
+        max-width: 1200px;
+    }
+
+    .navbar {
+        padding: var(--spacing-lg) var(--spacing-2xl);
+    }
+
+    .dashboard-header {
+        padding: var(--spacing-2xl);
+    }
+
+    .dashboard-header h1 {
+        font-size: 32px;
+    }
+
+    /* Quick Stats */
+    .quick-stats {
+        grid-template-columns: repeat(4, 1fr);
+        gap: var(--spacing-xl);
+    }
+
+    /* Status Grid */
+    .status-grid {
+        grid-template-columns: repeat(4, 1fr);
+        gap: var(--spacing-lg);
+    }
+
+    .camera-feed-container {
+        max-height: 65vh;
+    }
+}
+
+/* ============================================================
+   DESKTOP (1280px - 1920px)
+   ============================================================ */
+
+@media screen and (min-width: 1280px) and (max-width: 1919px) {
+    .container {
+        padding: var(--spacing-2xl);
+        max-width: 1300px;
+    }
+
+    .navbar {
+        padding: var(--spacing-lg) var(--spacing-2xl);
+    }
+
+    .dashboard-header {
+        padding: var(--spacing-2xl);
+    }
+
+    .dashboard-header h1 {
+        font-size: 36px;
+    }
+
+    /* Quick Stats */
+    .quick-stats {
+        grid-template-columns: repeat(4, 1fr);
+        gap: var(--spacing-xl);
+    }
+
+    /* Status Grid */
+    .status-grid {
+        grid-template-columns: repeat(4, 1fr);
+        gap: var(--spacing-xl);
+    }
+
+    .camera-feed-container {
+        max-height: 70vh;
+    }
+
+    .camera-grid {
+        grid-template-columns: 2fr 1fr;
+        gap: var(--spacing-xl);
+    }
+}
+
+/* ============================================================
+   LARGE DESKTOP (1920px+)
+   ============================================================ */
+
+@media screen and (min-width: 1920px) {
+    .container {
+        padding: var(--spacing-2xl);
+        max-width: 1600px;
+    }
+
+    .navbar {
+        padding: var(--spacing-xl) var(--spacing-2xl);
+    }
+
+    .dashboard-header {
+        padding: var(--spacing-2xl);
+    }
+
+    .dashboard-header h1 {
+        font-size: 40px;
+    }
+
+    /* Quick Stats */
+    .quick-stats {
+        grid-template-columns: repeat(6, 1fr);
+        gap: var(--spacing-xl);
+    }
+
+    /* Status Grid */
+    .status-grid {
+        grid-template-columns: repeat(5, 1fr);
+        gap: var(--spacing-xl);
+    }
+
+    .camera-feed-container {
+        max-height: 75vh;
+    }
+
+    .status-card {
+        padding: var(--spacing-2xl);
+    }
+
+    .quick-stat {
+        padding: var(--spacing-xl);
+    }
+}
+
+/* ============================================================
+   LANDSCAPE ORIENTATION (All Sizes)
+   ============================================================ */
+
+@media screen and (orientation: landscape) and (max-height: 600px) {
+    .navbar {
+        padding: var(--spacing-md) var(--spacing-lg);
+    }
+
+    .container {
+        padding: var(--spacing-md);
+    }
+
+    .dashboard-header {
+        padding: var(--spacing-md) var(--spacing-lg);
+    }
+
+    .camera-feed-container {
+        max-height: 65vh;
+    }
+
+    .quick-stats {
+        gap: var(--spacing-md);
+    }
+
+    .status-grid {
+        grid-template-columns: repeat(3, 1fr);
+        gap: var(--spacing-md);
+    }
+}
+
+/* ============================================================
+   ACCESSIBILITY & PRINT
+   ============================================================ */
+
+@media (prefers-reduced-motion: reduce) {
+    * {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+}
+
+@media print {
+
+    .navbar,
+    .nav-toggle,
+    .nav-menu,
+    .camera-controls,
+    .btn-refresh {
+        display: none !important;
+    }
+
+    .container {
+        padding: 20px;
+    }
+
+    body {
+        background: white;
+        color: black;
+    }
+
+    .dashboard-header,
+    .status-card {
+        page-break-inside: avoid;
+    }
+}
+
+/* ============================================================
+   HIGH DPI DISPLAYS (Retina)
+   ============================================================ */
+
+@media (min-device-pixel-ratio: 2) {
+
+    .status-pill,
+    .status-card,
+    button {
+        border-width: 0.5px;
+    }
+}
+
+/* ============================================================
+   DARK MODE (System Preference)
+   ============================================================ */
+
+@media (prefers-color-scheme: light) {
+    :root {
+        --bg-primary: #f5f5f5;
+        --bg-secondary: #ffffff;
+        --text-primary: #1a1a1a;
+        --text-secondary: #333;
+        --text-muted: #666;
+        --border: #ddd;
+    }
+
+    body {
+        background: #f5f5f5;
+    }
+}
+
+/* ============================================================
+   TOUCH DEVICE OPTIMIZATION
+   ============================================================ */
+
+@media (hover: none) and (pointer: coarse) {
+
+    button,
+    a,
+    .nav-menu a {
+        min-height: 44px;
+        min-width: 44px;
+    }
+
+    .btn-refresh {
+        width: 44px;
+        height: 44px;
+    }
+}
