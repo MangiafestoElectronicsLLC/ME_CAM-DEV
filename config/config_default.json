@@ -7,7 +7,7 @@
   "emergency_primary_contact": "",
   "send_motion_to_emergency": false,
   "alert_cooldown": 5,
-  "motion_threshold": 0.5,
+  "motion_threshold": 0.02,
   "motion_record_enabled": true,
   "motion_record_duration": 10,
   "nanny_cam_enabled": false,
@@ -128,6 +128,9 @@
     "session_timeout_minutes": 720,
     "allow_localhost": true,
     "allow_setup_without_vpn": true,
+    "enrollment_key": "",
+    "enrollment_key_updated_at": "",
+    "enrollment_key_reason": "",
     "secret_key": "",
     "device_token": ""
   },

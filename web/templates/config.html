@@ -446,6 +446,24 @@
                     <input type="number" name="share_link_expiry_hours"
                         value="{{ config.get('security', {}).get('share_link_expiry_hours', 72) }}" min="1" max="720">
                 </div>
+                <div class="form-group">
+                    <label>Customer Security Key</label>
+                    <div class="form-row">
+                        <input type="text" id="enrollmentKeyDisplay" value="••••-••••-••••-••••-••••" readonly>
+                        <button type="button" class="cleanup-button" onclick="revealSecurityKey()">🔑 View Key</button>
+                    </div>
+                    <div class="help-text">Needed for creating customer accounts on this device.</div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Current Username</label>
+                        <input type="text" id="keyUsername" placeholder="Your logged-in username">
+                    </div>
+                    <div class="form-group">
+                        <label>Current Password</label>
+                        <input type="password" id="keyPassword" placeholder="Current password">
+                    </div>
+                </div>
             </div>
 
             <!-- WiFi Settings (already added above, this is just positioning) -->
@@ -567,6 +585,35 @@
                 } else {
                     showNotification('❌ Reboot failed: ' + (data.error || 'Unknown error'), 'error');
                 }
+            } catch (err) {
+                showNotification('❌ Error: ' + err.message, 'error');
+            }
+        }
+
+        async function revealSecurityKey() {
+            const username = document.getElementById('keyUsername').value.trim();
+            const password = document.getElementById('keyPassword').value;
+
+            if (!username || !password) {
+                showNotification('❌ Enter current username and password first', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/security/enrollment-key/view', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+                const data = await response.json();
+                if (!response.ok || !data.ok) {
+                    showNotification('❌ ' + (data.error || 'Unable to verify credentials'), 'error');
+                    return;
+                }
+
+                document.getElementById('enrollmentKeyDisplay').value = data.enrollment_key || 'Unavailable';
+                document.getElementById('keyPassword').value = '';
+                showNotification('✅ Security key loaded', 'success');
             } catch (err) {
                 showNotification('❌ Error: ' + err.message, 'error');
             }

@@ -156,9 +156,9 @@ if __name__ == "__main__":
     # Log motion statistics
     motion_stats = get_event_statistics()
     logger.info(f"\n[MOTION] Statistics:")
-    logger.info(f"  Total events: {motion_stats.get('total_events', 0)}")
-    logger.info(f"  Today: {motion_stats.get('today_count', 0)}")
-    logger.info(f"  With video: {motion_stats.get('with_video', 0)}")
+    logger.info(f"  Total events: {motion_stats.get('total', 0)}")
+    logger.info(f"  Avg confidence: {motion_stats.get('avg_confidence', 0)}")
+    logger.info(f"  By type: {motion_stats.get('by_type', {})}")
     
     # Display camera configuration
     if use_lite:

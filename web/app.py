@@ -5,6 +5,9 @@ import os
 from datetime import datetime
 import time
 import sys
+import socket
+import urllib.request
+import urllib.error
 
 # Add src directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'src'))
@@ -15,7 +18,8 @@ from src.core import (
     authenticate, create_user, user_exists, get_user, delete_user,
     BatteryMonitor, extract_thumbnail, generate_setup_qr,
     log_motion_event, get_recent_events, get_event_statistics, export_events_csv,
-    get_sms_notifier
+    get_sms_notifier, verify_enrollment_key, ensure_enrollment_key,
+    rotate_enrollment_key
 )
 from src.camera import (
     camera_coordinator, LibcameraStreamer, is_libcamera_available,
@@ -53,6 +57,54 @@ class SystemStatus:
 watchdog = SystemStatus()  # Use simple status tracker instead of full pipeline watchdog
 
 battery = BatteryMonitor(enabled=True)
+
+# Login protection state (in-memory)
+login_attempts = {}
+LOGIN_WINDOW_SECONDS = 15 * 60
+LOGIN_MAX_ATTEMPTS = 6
+LOGIN_LOCKOUT_SECONDS = 10 * 60
+
+
+def _client_ip() -> str:
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.remote_addr or "unknown"
+
+
+def _login_attempt_key(username: str) -> str:
+    return f"{_client_ip()}|{(username or '').strip().lower()}"
+
+
+def _is_login_locked(key: str):
+    now = time.time()
+    entry = login_attempts.get(key)
+    if not entry:
+        return False, 0
+    lock_until = entry.get("lock_until", 0)
+    if lock_until > now:
+        return True, int(lock_until - now)
+
+    failures = [ts for ts in entry.get("failures", []) if (now - ts) <= LOGIN_WINDOW_SECONDS]
+    entry["failures"] = failures
+    if not failures and lock_until <= now:
+        login_attempts.pop(key, None)
+    return False, 0
+
+
+def _record_login_failure(key: str):
+    now = time.time()
+    entry = login_attempts.get(key, {"failures": [], "lock_until": 0})
+    failures = [ts for ts in entry.get("failures", []) if (now - ts) <= LOGIN_WINDOW_SECONDS]
+    failures.append(now)
+    entry["failures"] = failures
+    if len(failures) >= LOGIN_MAX_ATTEMPTS:
+        entry["lock_until"] = now + LOGIN_LOCKOUT_SECONDS
+    login_attempts[key] = entry
+
+
+def _clear_login_failures(key: str):
+    login_attempts.pop(key, None)
 
 # Initialize camera streamer - use fast streamer if available
 cfg = get_config()
@@ -335,12 +387,20 @@ def login():
     if request.method == "POST":
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
+        attempt_key = _login_attempt_key(username)
+
+        locked, seconds_left = _is_login_locked(attempt_key)
+        if locked:
+            minutes_left = max(1, int(seconds_left / 60))
+            logger.warning(f"[AUTH] Login temporarily locked for key={attempt_key}")
+            return render_template("login.html", error=f"Too many failed attempts. Try again in {minutes_left} minute(s).")
 
         cfg = get_config()
         bootstrap_required = cfg.get("bootstrap_required", False)
         bootstrap_admin = cfg.get("bootstrap_admin", "admin")
         
         if authenticate(username, password):
+            _clear_login_failures(attempt_key)
             if bootstrap_required and username != bootstrap_admin:
                 return render_template("login.html", error="Initial setup requires the admin account. Please sign in as admin to create the customer account.")
             session["authenticated"] = True
@@ -350,6 +410,7 @@ def login():
                 return redirect(url_for("customer_setup"))
             return redirect(url_for("index"))
         else:
+            _record_login_failure(attempt_key)
             return render_template("login.html", error="Invalid username or password")
     
     return render_template("login.html")
@@ -371,6 +432,7 @@ def customer_setup():
         customer_username = request.form.get("customer_username", "").strip()
         customer_password = request.form.get("customer_password", "")
         customer_password_confirm = request.form.get("customer_password_confirm", "")
+        security_key = request.form.get("security_key", "").strip()
 
         if not customer_username or len(customer_username) < 3:
             return render_template("customer_setup.html", error="Username must be at least 3 characters")
@@ -380,6 +442,8 @@ def customer_setup():
             return render_template("customer_setup.html", error="Password must be at least 8 characters")
         if customer_password != customer_password_confirm:
             return render_template("customer_setup.html", error="Passwords do not match")
+        if not verify_enrollment_key(security_key):
+            return render_template("customer_setup.html", error="Invalid customer security key")
 
         if user_exists(customer_username):
             return render_template("customer_setup.html", error="Username already exists")
@@ -407,6 +471,7 @@ def register():
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
         password_confirm = request.form.get("password_confirm", "")
+        security_key = request.form.get("security_key", "").strip()
         
         # Validation
         if not username or len(username) < 3:
@@ -417,6 +482,8 @@ def register():
         
         if password != password_confirm:
             return render_template("register.html", error="Passwords don't match")
+        if not verify_enrollment_key(security_key):
+            return render_template("register.html", error="Invalid customer security key")
         
         if user_exists(username):
             return render_template("register.html", error="Username already exists")
@@ -527,8 +594,9 @@ def change_password():
         if new_password != new_password_confirm:
             return render_template("change_password.html", error="Passwords don't match")
         
-        from user_auth import change_password as change_pwd
+        from src.core.user_auth import change_password as change_pwd
         if change_pwd(username, old_password, new_password):
+            rotate_enrollment_key(reason="password_change")
             logger.info(f"[AUTH] Password changed for {username}")
             return render_template("change_password.html", success="Password changed successfully!")
         else:
@@ -541,9 +609,58 @@ def logout():
     session.clear()
     return redirect(url_for("login"))
 
+
+@app.route("/api/security/enrollment-key/view", methods=["POST"])
+def api_view_enrollment_key():
+    if not require_auth():
+        return jsonify({'error': 'Not authenticated'}), 401
+
+    try:
+        data = request.get_json() or {}
+        username = (data.get('username') or '').strip()
+        password = data.get('password') or ''
+
+        if username != session.get("username"):
+            return jsonify({'error': 'Username must match current session'}), 403
+        if not authenticate(username, password):
+            return jsonify({'error': 'Invalid credentials'}), 403
+
+        cfg = get_config()
+        key = ensure_enrollment_key(cfg=cfg, force_rotate=False, reason="view")
+        return jsonify({'ok': True, 'enrollment_key': key})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route("/api/status")
 def api_status():
-    return jsonify(watchdog.status() if watchdog else {"active": False, "timestamp": time.time()})
+    try:
+        status = watchdog.status() if watchdog else {"active": False, "timestamp": time.time()}
+        battery_status = battery.get_status() if battery else {}
+        status.update({
+            "camera_available": bool(camera_available),
+            "battery": {
+                "percent": battery_status.get("percent", 0),
+                "is_low": battery_status.get("is_low", False),
+                "external_power": battery_status.get("external_power", False)
+            }
+        })
+        return jsonify(status)
+    except Exception as e:
+        logger.error(f"[STATUS] Failed to build status payload: {e}")
+        return jsonify({"active": False, "timestamp": time.time(), "error": str(e)}), 500
+
+
+@app.route("/api/health")
+def api_health():
+    try:
+        return jsonify({
+            "ok": True,
+            "service": "mecamera",
+            "camera_available": bool(camera_available),
+            "timestamp": time.time()
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "timestamp": time.time(), "error": str(e)}), 500
 
 @app.route("/api/trigger_emergency", methods=["POST"])
 def trigger_emergency():
@@ -1271,6 +1388,54 @@ def api_export_motion():
 
 # ==================== MULTI-DEVICE ENDPOINTS ====================
 
+def _normalize_device_host(device_id: str) -> str:
+    """Normalize device ID/host input into a resolvable host/IP string."""
+    if not device_id:
+        return ""
+
+    host = device_id.strip()
+
+    if host.startswith("http://"):
+        host = host[len("http://"):]
+    elif host.startswith("https://"):
+        host = host[len("https://"):]
+
+    host = host.split("/")[0]
+    host = host.split(":")[0] if host.count(":") == 1 and "." in host else host
+    return host.strip()
+
+
+def _build_device_url(host: str, port: int = 8080) -> str:
+    """Build dashboard URL for a remote device host/IP."""
+    if not host:
+        return "/"
+    return f"http://{host}:{port}"
+
+
+def _probe_device_status(host: str, timeout_sec: float = 1.2) -> dict:
+    """Probe device HTTP/API reachability and return online/offline status."""
+    now = time.time()
+    if not host:
+        return {"status": "offline", "last_seen": now, "reachable": False}
+
+    api_url = f"http://{host}:8080/api/status"
+
+    try:
+        with urllib.request.urlopen(api_url, timeout=timeout_sec) as resp:
+            if 200 <= getattr(resp, "status", 200) < 300:
+                return {"status": "online", "last_seen": now, "reachable": True}
+    except Exception:
+        pass
+
+    for port in (8080, 22):
+        try:
+            with socket.create_connection((host, port), timeout=timeout_sec):
+                return {"status": "online", "last_seen": now, "reachable": True}
+        except Exception:
+            continue
+
+    return {"status": "offline", "last_seen": now, "reachable": False}
+
 @app.route("/api/devices", methods=["GET"])
 def api_devices():
     """Get list of configured devices"""
@@ -1284,17 +1449,22 @@ def api_devices():
         # Format devices list with current status
         devices = []
         for device in devices_config:
+            raw_id = device.get("id", device.get("name", ""))
+            host = _normalize_device_host(device.get("ip") or raw_id)
+            probe = _probe_device_status(host)
+
             device_info = {
-                "id": device.get("id", device.get("name", "")),
+                "id": raw_id,
                 "name": device.get("name", "Unknown Device"),
-                "ip": device.get("ip", ""),
+                "ip": host,
                 "location": device.get("location", ""),
-                "status": device.get("status", "unknown"),
+                "status": probe.get("status", device.get("status", "unknown")),
                 "battery": device.get("battery", None),
                 "storage": device.get("storage", "0 GB"),
                 "events_24h": device.get("events_24h", 0),
-                "last_seen": device.get("last_seen", time.time()),
-                "firmware": device.get("firmware", "Unknown")
+                "last_seen": probe.get("last_seen", device.get("last_seen", time.time())),
+                "firmware": device.get("firmware", "Unknown"),
+                "url": device.get("url") or _build_device_url(host)
             }
             devices.append(device_info)
         
@@ -1309,7 +1479,8 @@ def api_devices():
             "storage": f"{get_storage_used_gb(cfg):.2f} GB",
             "events_24h": count_recent_events(cfg, hours=24),
             "last_seen": time.time(),
-            "firmware": "Latest"
+            "firmware": "Latest",
+            "url": "/"
         }
         
         # Insert current device at beginning
@@ -1334,6 +1505,7 @@ def api_add_device():
         device_id = data.get("id", "").strip()
         device_name = data.get("name", "Unknown").strip()
         device_location = data.get("location", "").strip()
+        host = _normalize_device_host(device_id)
         
         if not device_id:
             return jsonify({"ok": False, "error": "Device ID required"}), 400
@@ -1348,14 +1520,15 @@ def api_add_device():
         new_device = {
             "id": device_id,
             "name": device_name,
-            "ip": device_id,
+            "ip": host,
             "location": device_location,
             "status": "pending",
             "battery": None,
             "storage": "0 GB",
             "events_24h": 0,
             "last_seen": time.time(),
-            "firmware": "Unknown"
+            "firmware": "Unknown",
+            "url": _build_device_url(host)
         }
         
         devices.append(new_device)

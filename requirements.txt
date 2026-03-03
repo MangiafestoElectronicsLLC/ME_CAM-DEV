@@ -7,9 +7,11 @@ Flask==3.0.0
 Werkzeug==3.0.0
 Flask-Cors==4.0.0
 
-# Remote Access (NEW v3.0)
-aiortc>=1.5.0            # WebRTC peer connections
-av>=11.0.0               # Audio/Video processing for WebRTC
+# Remote Access (WebRTC)
+# NOTE: WebRTC dependencies are intentionally NOT in base requirements.
+# On Pi Zero 2W / armv7, pip may try to build av from source and fail.
+# Install only on capable devices when WebRTC is required:
+#   pip install -r requirements-webrtc.txt
 
 # Encryption & Security
 cryptography==42.0.0
@@ -52,3 +54,4 @@ aiohttp>=3.9.0           # For async cloud uploads
 # tensorflow-lite-runtime==2.11.0  # Edge AI detection (OPTIONAL)
 # firebase-admin>=6.0.0            # Push notifications (OPTIONAL)
 # opencv-python-headless>=4.8.0    # If not using system OpenCV (NOT RECOMMENDED)
+# aiortc / av                       # WebRTC optional (see requirements-webrtc.txt)

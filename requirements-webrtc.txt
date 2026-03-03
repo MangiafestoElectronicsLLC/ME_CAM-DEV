@@ -1,0 +1,6 @@
+# Optional WebRTC dependencies
+# Install only when WebRTC is needed:
+#   pip install -r requirements-webrtc.txt
+
+aiortc>=1.5.0
+av>=11.0.0

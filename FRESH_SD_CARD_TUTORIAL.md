@@ -253,10 +253,28 @@ sudo journalctl -u me_cam -f
 ### 3.1 Update System
 
 ```bash
-sudo apt update && sudo apt upgrade -y
+sudo apt update
 ```
 
 **Time: 3-5 minutes**
+
+If `apt update` reports a release metadata change, run:
+
+```bash
+sudo apt update --allow-releaseinfo-change
+```
+
+Only if APT is broken/corrupted (not for normal fresh flash), run recovery:
+
+```bash
+sudo apt clean
+sudo rm -rf /var/lib/apt/lists/*
+sudo apt update --allow-releaseinfo-change
+sudo dpkg --configure -a
+sudo apt --fix-broken install -y
+```
+
+**Important (fresh SD cards):** Do **not** run full `apt upgrade` before dependencies. Install app dependencies first to avoid large kernel/system upgrades during initial provisioning.
 
 ### 3.2 Install System Dependencies
 
@@ -311,6 +329,20 @@ Successfully installed pip-25.3
 pip install -r requirements.txt
 ```
 
+Optional (only if WebRTC is required and the device can support it):
+
+```bash
+pip install -r requirements-webrtc.txt
+```
+
+If your cloned repo is older and `pip install -r requirements.txt` still tries to install `aiortc`/`av`, remove those lines and retry:
+
+```bash
+cp requirements.txt requirements.txt.bak
+sed -i '/^aiortc/d;/^av>=/d' requirements.txt
+pip install -r requirements.txt
+```
+
 **This installs 45+ packages including:**
 - Flask==3.0.0, Werkzeug==3.0.0
 - cryptography==42.0.0 (upgraded for v2.2.4)
@@ -331,32 +363,25 @@ pip install -r requirements.txt
 ### 3.7 Create Configuration
 
 ```bash
-mkdir -p config
-nano config/config.json
+python3 scripts/generate_config.py --profile device4
 ```
 
-**Paste this configuration:**
-```json
-{
-    "first_run_completed": true,
-    "device_name": "ME_CAM_4",
-    "device_id": "pi-cam-004",
-    "wifi_ssid": "",
-    "wifi_password": "",
-    "sensitivity": 0.2,
-    "resolution": "640x480",
-    "framerate": 15,
-    "motion_detection": true,
-    "video_length": 30,
-    "storage_limit_gb": 50,
-    "auto_delete_old": true,
-    "stream_enabled": true,
-    "stream_port": 8080,
-    "web_port": 8080
-}
+**Use the profile that matches your device:**
+- `device3` = Pi Zero 2W + IMX519
+- `device4` = Pi Zero 2W + OV547
+- `device7` = Pi 5 testing/hub profile
+
+If `config/config.json` already exists, add `--force` to overwrite:
+
+```bash
+python3 scripts/generate_config.py --profile device4 --force
 ```
 
-**Save:** Ctrl+O, Enter, Ctrl+X
+Optional custom numbering while keeping defaults:
+
+```bash
+python3 scripts/generate_config.py --profile device7 --device-number 8 --force
+```
 
 ### 3.8 Test Run
 

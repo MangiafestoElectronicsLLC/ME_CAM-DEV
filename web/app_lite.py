@@ -31,8 +31,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
 from src.core import (
     get_config, save_config, is_first_run, mark_first_run_complete,
     authenticate, BatteryMonitor, log_motion_event, get_recent_events,
-    get_event_statistics
+    get_event_statistics, ensure_enrollment_key, verify_enrollment_key,
+    rotate_enrollment_key
 )
+from src.utils.pi_detect import detect_camera_rotation
 from src.core.secure_encryption import get_encryption
 try:
     from src.cloud.encrypted_cloud_storage import get_cloud_storage
@@ -134,7 +136,7 @@ def _ensure_security_cfg(cfg: dict) -> dict:
         security["secret_key"] = secrets.token_urlsafe(32)
         changed = True
     if "tailscale_only" not in security:
-        security["tailscale_only"] = True
+        security["tailscale_only"] = False
         changed = True
     if "share_links_enabled" not in security:
         security["share_links_enabled"] = True
@@ -156,6 +158,9 @@ def _ensure_security_cfg(cfg: dict) -> dict:
         changed = True
     if "bootstrap_admin" not in security:
         security["bootstrap_admin"] = ""
+        changed = True
+    if not security.get("enrollment_key"):
+        security["enrollment_key"] = ensure_enrollment_key(cfg=cfg, force_rotate=False, reason="init")
         changed = True
     cfg["security"] = security
     if changed:
@@ -513,17 +518,39 @@ def create_lite_app(pi_model, camera_config):
                 return jsonify({"error": "Tailscale access required"}), 403
             return render_template("access_blocked.html"), 403
     
+    app_started_at = time.time()
+
     # Lightweight battery monitor
     battery = BatteryMonitor(enabled=True)
+    low_battery_alert_at = {"ts": 0.0}
 
     # Background queue flush for offline clips/cloud sync
     def _background_sync():
         while True:
             try:
-                maybe_flush_queues(30)
+                maybe_flush_queues(10)
+                status = battery.get_status()
+                if status.get("is_low"):
+                    now = time.time()
+                    if now - low_battery_alert_at["ts"] > 1800:
+                        cfg = get_config()
+                        if cfg.get('sms_enabled') and cfg.get('send_motion_to_emergency'):
+                            phone = cfg.get('sms_phone_to') or cfg.get('emergency_phone')
+                            if phone:
+                                try:
+                                    from src.core import get_sms_notifier
+                                    notifier = get_sms_notifier()
+                                    pct = status.get('percent')
+                                    pct_text = f"{pct}%" if isinstance(pct, int) else "unknown"
+                                    msg = f"⚠️ {cfg.get('device_name', 'ME Camera')}: Low power detected (battery {pct_text}, undervolt={not status.get('external_power', True)})."
+                                    notifier.send_sms(phone, msg)
+                                    low_battery_alert_at["ts"] = now
+                                    logger.warning(f"[POWER] Low battery alert sent to {phone}")
+                                except Exception as e:
+                                    logger.warning(f"[POWER] Low battery alert failed: {e}")
             except Exception as e:
                 logger.debug(f"[SYNC] Background sync error: {e}")
-            time.sleep(15)
+            time.sleep(5)
 
     threading.Thread(target=_background_sync, daemon=True).start()
     
@@ -534,23 +561,77 @@ def create_lite_app(pi_model, camera_config):
         'frames': []
     }
 
+    # Login protection state (in-memory, lightweight)
+    login_attempts = {}
+    LOGIN_WINDOW_SECONDS = 15 * 60
+    LOGIN_MAX_ATTEMPTS = 6
+    LOGIN_LOCKOUT_SECONDS = 10 * 60
+
+    def _login_attempt_key(username: str) -> str:
+        ip = _get_client_ip() or 'unknown'
+        return f"{ip}|{(username or '').strip().lower()}"
+
+    def _is_login_locked(key: str):
+        now = time.time()
+        entry = login_attempts.get(key)
+        if not entry:
+            return False, 0
+        lock_until = entry.get('lock_until', 0)
+        if lock_until > now:
+            return True, int(lock_until - now)
+        # prune stale history
+        failures = [ts for ts in entry.get('failures', []) if (now - ts) <= LOGIN_WINDOW_SECONDS]
+        entry['failures'] = failures
+        if not failures and lock_until <= now:
+            login_attempts.pop(key, None)
+        return False, 0
+
+    def _record_login_failure(key: str):
+        now = time.time()
+        entry = login_attempts.get(key, {'failures': [], 'lock_until': 0})
+        failures = [ts for ts in entry.get('failures', []) if (now - ts) <= LOGIN_WINDOW_SECONDS]
+        failures.append(now)
+        entry['failures'] = failures
+        if len(failures) >= LOGIN_MAX_ATTEMPTS:
+            entry['lock_until'] = now + LOGIN_LOCKOUT_SECONDS
+        login_attempts[key] = entry
+
+    def _clear_login_failures(key: str):
+        login_attempts.pop(key, None)
+
     # Nanny cam mode (when enabled, motion is not logged/recorded)
     nanny_cam_enabled = False
     
     # Initialize camera - try RpicamStreamer first (most compatible)
     camera = None
     camera_available = False
+    camera_rotation_mode = detect_camera_rotation() or 'normal'
     
     if camera_config['mode'] in ['lite', 'fast']:
         try:
             from src.camera import RpicamStreamer, is_rpicam_available
+            rotation_degrees = {
+                'rotate_90': 90,
+                'rotate_180': 180,
+                'rotate_270': 270
+            }.get(camera_rotation_mode, 0)
+            hflip = camera_rotation_mode == 'flip_horizontal'
+            vflip = camera_rotation_mode == 'flip_vertical'
             
             if is_rpicam_available():
                 logger.info("[CAMERA] Attempting rpicam-jpeg streaming (OPTIMIZED)...")
-                camera = RpicamStreamer(width=640, height=480, fps=30, quality=95)
+                camera = RpicamStreamer(
+                    width=640,
+                    height=480,
+                    fps=30,
+                    quality=95,
+                    rotation=rotation_degrees,
+                    hflip=hflip,
+                    vflip=vflip,
+                )
                 if camera.start():
                     camera_available = True
-                    logger.success(f"[CAMERA] RPiCam initialized (OPTIMIZED): 640x480 @ 30 FPS, Quality 95")
+                    logger.success(f"[CAMERA] RPiCam initialized (OPTIMIZED): 640x480 @ 30 FPS, Quality 95, rotation={camera_rotation_mode}")
             else:
                 logger.warning("[CAMERA] rpicam-jpeg not available, falling back to picamera2...")
                 from picamera2 import Picamera2
@@ -955,6 +1036,13 @@ def create_lite_app(pi_model, camera_config):
         if request.method == "POST":
             username = request.form.get("username")
             password = request.form.get("password")
+            attempt_key = _login_attempt_key(username)
+
+            locked, seconds_left = _is_login_locked(attempt_key)
+            if locked:
+                minutes_left = max(1, int(seconds_left / 60))
+                logger.warning(f"[AUTH] Login temporarily locked for key={attempt_key}")
+                return render_template('login.html', error=f"Too many failed attempts. Try again in {minutes_left} minute(s).")
 
             cfg = get_config()
             security_cfg = _ensure_security_cfg(cfg)
@@ -962,6 +1050,7 @@ def create_lite_app(pi_model, camera_config):
             bootstrap_admin = security_cfg.get('bootstrap_admin') or 'admin'
             
             if authenticate(username, password):
+                _clear_login_failures(attempt_key)
                 if bootstrap_required and username != bootstrap_admin:
                     return render_template('login.html', error="Initial setup requires the admin account. Please sign in as admin to create the customer account.")
                 session.permanent = True
@@ -972,6 +1061,7 @@ def create_lite_app(pi_model, camera_config):
                     return redirect(url_for('customer_setup'))
                 return redirect(url_for('index'))
             else:
+                _record_login_failure(attempt_key)
                 return render_template('login.html', error="Invalid credentials")
         
         return render_template('login.html')
@@ -995,6 +1085,7 @@ def create_lite_app(pi_model, camera_config):
             customer_username = request.form.get("customer_username", "").strip()
             customer_password = request.form.get("customer_password", "")
             customer_password_confirm = request.form.get("customer_password_confirm", "")
+            security_key = request.form.get("security_key", "").strip()
 
             if not customer_username or len(customer_username) < 3:
                 return render_template('customer_setup.html', error="Username must be at least 3 characters")
@@ -1004,6 +1095,8 @@ def create_lite_app(pi_model, camera_config):
                 return render_template('customer_setup.html', error="Password must be at least 8 characters")
             if customer_password != customer_password_confirm:
                 return render_template('customer_setup.html', error="Passwords do not match")
+            if not verify_enrollment_key(security_key):
+                return render_template('customer_setup.html', error="Invalid customer security key")
 
             from src.core import create_user, delete_user, user_exists
             if user_exists(customer_username):
@@ -1036,6 +1129,7 @@ def create_lite_app(pi_model, camera_config):
             username = request.form.get("username", "").strip()
             password = request.form.get("password", "")
             password_confirm = request.form.get("password_confirm", "")
+            security_key = request.form.get("security_key", "").strip()
             
             # Validation
             if not username or len(username) < 3:
@@ -1046,6 +1140,9 @@ def create_lite_app(pi_model, camera_config):
             
             if password != password_confirm:
                 return render_template("register.html", error="Passwords don't match")
+
+            if not verify_enrollment_key(security_key):
+                return render_template("register.html", error="Invalid customer security key")
             
             from src.core import user_exists, create_user
             if user_exists(username):
@@ -1159,7 +1256,7 @@ def create_lite_app(pi_model, camera_config):
             },
             'wifi_enabled': cfg.get('wifi_enabled', True),
             'bluetooth_enabled': cfg.get('bluetooth_enabled', False),
-            'motion_threshold': cfg.get('motion_threshold', 0.5),
+            'motion_threshold': cfg.get('motion_threshold', 0.02),
             'motion_record_enabled': cfg.get('motion_record_enabled', True),
             'motion_record_duration': cfg.get('motion_record_duration', 10),
             'sms_enabled': cfg.get('sms_enabled', False),
@@ -1187,7 +1284,7 @@ def create_lite_app(pi_model, camera_config):
             device_location=cfg.get('device_location', 'Unknown'),
             emergency_phone=cfg.get('emergency_phone', ''),
             send_motion_to_emergency=cfg.get('send_motion_to_emergency', False),
-            motion_threshold=cfg.get('motion_threshold', 0.5),
+            motion_threshold=cfg.get('motion_threshold', 0.02),
             motion_record_enabled=cfg.get('motion_record_enabled', True),
             motion_record_duration=cfg.get('motion_record_duration', 10),
             storage_cleanup_days=cfg.get('storage_cleanup_days', 7),
@@ -1287,8 +1384,110 @@ def create_lite_app(pi_model, camera_config):
             'runtime_minutes': status.get('runtime_minutes', 0),
             'external_power': status.get('external_power', False),
             'is_low': status.get('is_low', False),
+            'note': status.get('note', ''),
+            'percent_source': status.get('percent_source', 'unknown'),
             'timestamp': datetime.utcnow().isoformat()
         })
+
+    @app.route("/api/status", methods=["GET"])
+    def api_status():
+        """Unified runtime status endpoint for health checks and fleet monitoring."""
+        try:
+            battery_status = battery.get_status()
+            storage = get_storage_info()
+            cfg = get_config()
+
+            # System uptime from kernel when available
+            system_uptime_seconds = None
+            try:
+                with open('/proc/uptime', 'r') as f:
+                    system_uptime_seconds = int(float(f.read().split()[0]))
+            except Exception:
+                pass
+
+            app_uptime_seconds = int(max(0, time.time() - app_started_at))
+
+            return jsonify({
+                'active': True,
+                'timestamp': time.time(),
+                'device_name': cfg.get('device_name', 'ME_CAM'),
+                'mode': camera_config.get('mode', 'lite'),
+                'camera_available': bool(camera is not None and camera_available),
+                'camera_rotation': camera_rotation_mode,
+                'wifi_connected': is_wifi_connected(),
+                'battery': {
+                    'percent': battery_status.get('percent', 0),
+                    'is_low': battery_status.get('is_low', False),
+                    'external_power': battery_status.get('external_power', False),
+                    'source': battery_status.get('percent_source', 'unknown')
+                },
+                'storage': {
+                    'free_gb': storage.get('free_gb', 0),
+                    'used_gb': storage.get('used_gb', 0),
+                    'recording_count': storage.get('recording_count', 0)
+                },
+                'queues': {
+                    'offline_clips': len(_load_queue(OFFLINE_QUEUE_FILE)),
+                    'notifications': len(_load_queue(NOTIFY_QUEUE_FILE))
+                },
+                'uptime': {
+                    'app_seconds': app_uptime_seconds,
+                    'system_seconds': system_uptime_seconds
+                }
+            })
+        except Exception as e:
+            logger.error(f"[STATUS] Failed to build status payload: {e}")
+            return jsonify({
+                'active': False,
+                'error': str(e),
+                'timestamp': time.time()
+            }), 500
+
+    @app.route("/api/health", methods=["GET"])
+    def api_health():
+        """Lightweight health probe endpoint for load balancers and watchdogs."""
+        try:
+            return jsonify({
+                'ok': True,
+                'service': 'mecamera',
+                'camera_available': bool(camera is not None and camera_available),
+                'wifi_connected': is_wifi_connected(),
+                'timestamp': time.time()
+            })
+        except Exception as e:
+            return jsonify({'ok': False, 'error': str(e), 'timestamp': time.time()}), 500
+
+    @app.route("/api/security/enrollment-key/view", methods=["POST"])
+    def api_view_enrollment_key():
+        """Reveal enrollment key only after confirming current account credentials."""
+        if 'user' not in session:
+            return jsonify({'error': 'Not authenticated'}), 401
+
+        try:
+            data = request.get_json() or {}
+            username = (data.get('username') or '').strip()
+            password = data.get('password') or ''
+
+            if not username or not password:
+                return jsonify({'error': 'Username and password are required'}), 400
+
+            if username != session.get('user'):
+                return jsonify({'error': 'Username must match current session'}), 403
+
+            if not authenticate(username, password):
+                return jsonify({'error': 'Invalid credentials'}), 403
+
+            cfg = get_config()
+            key = ensure_enrollment_key(cfg=cfg, force_rotate=False, reason='view')
+            security_cfg = _ensure_security_cfg(cfg)
+            return jsonify({
+                'ok': True,
+                'enrollment_key': key,
+                'updated_at': security_cfg.get('enrollment_key_updated_at')
+            })
+        except Exception as e:
+            logger.error(f"[SECURITY] Enrollment key view failed: {e}")
+            return jsonify({'error': str(e)}), 500
     
     # NEW: WiFi status API endpoints
     @app.route("/api/network/wifi", methods=["GET"])
@@ -1377,34 +1576,46 @@ def create_lite_app(pi_model, camera_config):
             
             # Save to config
             cfg = get_config()
+            previous_ssid = cfg.get('wifi_ssid', '')
+            previous_password = cfg.get('wifi_password', '')
             cfg['wifi_ssid'] = ssid
             cfg['wifi_password'] = password
             cfg['wifi_enabled'] = True
             save_config(cfg)
+
+            if ssid != previous_ssid or password != previous_password:
+                rotate_enrollment_key(reason='wifi_change')
+                logger.warning("[SECURITY] Enrollment key rotated due to WiFi credential change")
             
             # Try to apply WiFi config at system level
             try:
                 import subprocess
-                
-                # Create wpa_supplicant config
-                wpa_conf = f'''ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev
-update_config=1
 
-network={{
-    ssid="{ssid}"
-    psk="{password}"
-    key_mgmt=WPA-PSK
-}}'''
-                
-                # Write and apply
-                temp_conf = '/tmp/wpa_supplicant.conf'
-                with open(temp_conf, 'w') as f:
-                    f.write(wpa_conf)
-                
-                subprocess.run(['sudo', 'cp', temp_conf, '/etc/wpa_supplicant/wpa_supplicant.conf'], 
-                              timeout=5, capture_output=True, check=False)
-                subprocess.run(['sudo', 'systemctl', 'restart', 'wpa_supplicant'], 
-                              timeout=5, capture_output=True, check=False)
+                temp_network = '/tmp/mecam_network.conf'
+                result = subprocess.run(
+                    ['wpa_passphrase', ssid, password],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                    check=False
+                )
+                if result.returncode != 0:
+                    raise RuntimeError(result.stderr.strip() or 'wpa_passphrase failed')
+
+                with open(temp_network, 'w') as f:
+                    f.write("ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev\n")
+                    f.write("update_config=1\n")
+                    f.write(f"country={cfg.get('wifi_country', 'US')}\n\n")
+                    f.write(result.stdout)
+
+                subprocess.run(
+                    ['sudo', 'install', '-m', '600', temp_network, '/etc/wpa_supplicant/wpa_supplicant.conf'],
+                    timeout=8,
+                    capture_output=True,
+                    check=False
+                )
+                subprocess.run(['sudo', 'systemctl', 'restart', 'dhcpcd'], timeout=8, capture_output=True, check=False)
+                subprocess.run(['sudo', 'wpa_cli', '-i', 'wlan0', 'reconfigure'], timeout=8, capture_output=True, check=False)
                 
                 logger.success(f"[NETWORK] WiFi applied: {ssid}")
             except Exception as e:
@@ -1811,13 +2022,15 @@ network={{
         try:
             data = request.get_json()
             cfg = get_config()
+            previous_ssid = cfg.get('wifi_ssid', '')
+            previous_password = cfg.get('wifi_password', '')
             
             # Update settings
             cfg['device_name'] = data.get('device_name', cfg.get('device_name'))
             cfg['device_location'] = data.get('device_location', cfg.get('device_location'))
             cfg['emergency_phone'] = data.get('emergency_phone', cfg.get('emergency_phone'))
             cfg['send_motion_to_emergency'] = data.get('send_motion_to_emergency', False)
-            cfg['motion_threshold'] = float(data.get('motion_threshold', 0.5))
+            cfg['motion_threshold'] = float(data.get('motion_threshold', 0.02))
             cfg['motion_record_enabled'] = data.get('motion_record_enabled', True)
             cfg['motion_record_duration'] = int(data.get('motion_record_duration', 10))
             cfg['storage_cleanup_days'] = int(data.get('storage_cleanup_days', 7))
@@ -1856,6 +2069,9 @@ network={{
             cfg['storage']['encrypted_dir'] = cfg.get('storage_encrypted_dir', 'recordings_encrypted')
             
             save_config(cfg)
+            if cfg.get('wifi_ssid', '') != previous_ssid or cfg.get('wifi_password', '') != previous_password:
+                rotate_enrollment_key(reason='wifi_change')
+                logger.warning("[SECURITY] Enrollment key rotated due to WiFi/config change")
             logger.info("[CONFIG] Settings updated")
             return jsonify({'ok': True, 'message': 'Configuration saved'})
         except Exception as e:
@@ -2050,6 +2266,8 @@ network={{
         frame_count = 0
         recording_frames = []
         recording_start = None
+        no_frame_count = 0
+        motion_streak = 0
         
         def save_video_async(frames_list, event_id):
             """Save video in background thread to avoid blocking stream"""
@@ -2147,8 +2365,19 @@ network={{
                     # RpicamStreamer - get JPEG directly
                     jpeg_bytes = camera.get_jpeg_frame()
                     if not jpeg_bytes:
-                        time.sleep(0.1)
+                        no_frame_count += 1
+                        if no_frame_count > 50 and hasattr(camera, 'restart'):
+                            logger.warning("[CAMERA] Stream stalled, restarting rpicam streamer...")
+                            try:
+                                if camera.restart():
+                                    no_frame_count = 0
+                                    logger.success("[CAMERA] rpicam streamer restarted")
+                            except Exception as restart_error:
+                                logger.error(f"[CAMERA] Restart failed: {restart_error}")
+                        time.sleep(0.05)
                         continue
+
+                    no_frame_count = 0
                     
                     frame_count += 1
                     
@@ -2167,27 +2396,41 @@ network={{
                                 
                                 if last_frame is not None:
                                     diff = cv2.absdiff(last_frame, gray)
-                                    _, thresh = cv2.threshold(diff, 25, 255, cv2.THRESH_BINARY)
+                                    blur = cv2.GaussianBlur(diff, (11, 11), 0)
+                                    _, thresh = cv2.threshold(blur, 28, 255, cv2.THRESH_BINARY)
+                                    thresh = cv2.dilate(thresh, None, iterations=2)
+                                    thresh = cv2.erode(thresh, None, iterations=1)
+
                                     motion_pixels = cv2.countNonZero(thresh)
                                     total_pixels = gray.shape[0] * gray.shape[1]
                                     motion_ratio = motion_pixels / total_pixels
                                     
                                     cfg = get_config()
-                                    motion_threshold = cfg.get('motion_threshold', 0.02)
+                                    motion_threshold = max(0.006, float(cfg.get('motion_threshold', 0.02)))
+                                    min_area = int(cfg.get('detection', {}).get('min_motion_area', 500))
+                                    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                                    significant_contours = sum(1 for c in contours if cv2.contourArea(c) >= min_area)
+                                    trigger_now = motion_ratio > motion_threshold and significant_contours > 0
+                                    motion_streak = (motion_streak + 1) if trigger_now else max(0, motion_streak - 1)
                                     
                                     # Motion detected and not in cooldown
-                                    if motion_ratio > motion_threshold and motion_cooldown == 0:
+                                    if motion_streak >= 3 and motion_cooldown == 0:
                                         logger.info(f"[MOTION] Motion detected: {motion_ratio*100:.1f}% pixels")
                                         
                                         # Log motion event and get event_id
-                                        event_data = log_motion_event('motion', motion_ratio, {'threshold': motion_threshold})
+                                        event_data = log_motion_event('motion', motion_ratio, {
+                                            'threshold': motion_threshold,
+                                            'contours': significant_contours,
+                                            'motion_pixels': motion_pixels
+                                        })
                                         event_id = event_data.get('id') if event_data else f"evt_{int(time.time()*1000)}"
                                         
                                         # Start recording
                                         recording = True
                                         recording_frames = list(frame_buffer)  # Pre-motion frames
                                         recording_start = time.time()
-                                        motion_cooldown = 20  # ~1 second cooldown for faster response
+                                        motion_cooldown = 45  # ~1.5 seconds cooldown
+                                        motion_streak = 0
                                         
                                         logger.info(f"[MOTION] Recording started with {len(recording_frames)} pre-motion frames")
                                 
@@ -2219,6 +2462,16 @@ network={{
                 
                 # picamera2 - get array and convert
                 frame = camera.capture_array()
+                if camera_rotation_mode == 'rotate_180':
+                    frame = cv2.rotate(frame, cv2.ROTATE_180)
+                elif camera_rotation_mode == 'rotate_90':
+                    frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+                elif camera_rotation_mode == 'rotate_270':
+                    frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+                elif camera_rotation_mode == 'flip_horizontal':
+                    frame = cv2.flip(frame, 1)
+                elif camera_rotation_mode == 'flip_vertical':
+                    frame = cv2.flip(frame, 0)
                 frame_count += 1  # BUG FIX #3: Increment frame counter
                 
                 # Motion detection - check every 2nd frame for performance

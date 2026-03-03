@@ -20,12 +20,15 @@ import signal
 class RpicamStreamer:
     """Stream camera via rpicam-jpeg subprocess - persistent connection"""
     
-    def __init__(self, width=640, height=480, fps=15, timeout=5, quality=95):
+    def __init__(self, width=640, height=480, fps=15, timeout=5, quality=95, rotation=0, hflip=False, vflip=False):
         self.width = width
         self.height = height
         self.fps = fps
-        self.timeout = timeout
+        self.timeout = timeout  # Process timeout in seconds
         self.quality = quality
+        self.rotation = rotation
+        self.hflip = hflip
+        self.vflip = vflip
         self.running = False
         self.process = None
         self.last_frame = None
@@ -34,6 +37,8 @@ class RpicamStreamer:
         self.error_count = 0
         self.last_frame_time = 0
         self.capture_thread = None
+        self.capture_timeout = 2  # Individual capture timeout in seconds (reduced for faster response)
+        self.consecutive_failures = 0
         
         # Verify rpicam-jpeg is available
         self.rpicam_path = self._find_rpicam()
@@ -124,16 +129,22 @@ class RpicamStreamer:
                 self.rpicam_path,
                 '--width', str(self.width),
                 '--height', str(self.height),
-                '-t', '100',  # Timeout 100ms (quick capture)
+                '-t', '50',  # Reduced timeout 50ms for faster capture
                 '-o', '-',  # Output to stdout
                 '--nopreview',
                 '--quality', str(self.quality),
+                '--rotation', str(self.rotation),
             ]
+
+            if self.hflip:
+                cmd.append('--hflip')
+            if self.vflip:
+                cmd.append('--vflip')
             
             result = subprocess.run(
                 cmd,
                 capture_output=True,
-                timeout=self.timeout,
+                timeout=self.capture_timeout,  # Use capture_timeout instead of self.timeout
                 text=False
             )
             
@@ -141,12 +152,16 @@ class RpicamStreamer:
                 with self.lock:
                     self.last_frame = result.stdout
                     self.frame_count += 1
+                    self.last_frame_time = time.time()
+                self.consecutive_failures = 0
                 return result.stdout
                     
         except subprocess.TimeoutExpired:
             logger.debug("[RPICAM] Frame capture timeout")
+            self.consecutive_failures += 1
         except Exception as e:
             logger.debug(f"[RPICAM] Frame capture error: {e}")
+            self.consecutive_failures += 1
         
         return None
     
@@ -159,10 +174,16 @@ class RpicamStreamer:
                     with self.lock:
                         self.last_frame = frame
                         self.frame_count += 1
-                time.sleep(0.033)  # ~30 FPS
+                        self.last_frame_time = time.time()
+                    self.consecutive_failures = 0
+                elif self.consecutive_failures > 25:
+                    logger.warning("[RPICAM] Too many capture failures, backing off before retry")
+                    time.sleep(1.0)
+                    self.consecutive_failures = 0
+                time.sleep(0.020)  # ~50 FPS potential (actual will be 20-30 FPS due to capture time)
             except Exception as e:
                 logger.debug(f"[RPICAM] Continuous capture error: {e}")
-                time.sleep(0.1)
+                time.sleep(0.05)
     
     def start(self):
         """Start camera using background capture thread for better performance"""
@@ -210,6 +231,10 @@ class RpicamStreamer:
         """Get current JPEG frame - returns buffered frame from background thread"""
         if not self.running:
             return None
+
+        # If frame is stale, attempt a direct capture to recover quickly.
+        if self.last_frame_time and (time.time() - self.last_frame_time > 2.0):
+            self._capture_single_frame()
         
         # Return buffered frame captured by background thread
         with self.lock:
@@ -228,6 +253,13 @@ class RpicamStreamer:
             if self.capture_thread.is_alive():
                 logger.warning("[RPICAM] Capture thread didn't stop gracefully (expected for daemon)")
         logger.info(f"[RPICAM] Stopped after {self.frame_count} frames (errors: {self.error_count})")
+
+    def restart(self):
+        """Restart camera capture loop."""
+        logger.info("[RPICAM] Restart requested")
+        self.stop()
+        time.sleep(0.5)
+        return self.start()
 
 
 def is_rpicam_available():
