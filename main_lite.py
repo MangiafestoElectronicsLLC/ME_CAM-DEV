@@ -64,6 +64,7 @@ if __name__ == "__main__":
             port=8080, 
             debug=False, 
             ssl_context=(cert_file, key_file),
+            threaded=True,
             use_reloader=False  # Disable reloader on Pi Zero (saves memory)
         )
     else:
@@ -74,5 +75,6 @@ if __name__ == "__main__":
             host="0.0.0.0", 
             port=8080, 
             debug=False,
+            threaded=True,
             use_reloader=False
         )

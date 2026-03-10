@@ -1,0 +1,12 @@
+[Unit]
+Description=Run ME Camera watchdog every minute
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+AccuracySec=10s
+Unit=mecamera-watchdog.service
+Persistent=true
+
+[Install]
+WantedBy=timers.target

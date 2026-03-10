@@ -15,9 +15,8 @@ StandardOutput=journal
 StandardError=journal
 
 # Memory optimization for Pi Zero 2W
-# Limit memory usage to prevent OOM killer
-MemoryMax=400M
-MemoryHigh=350M
+# Soft memory pressure target only (avoid hard-kill during brief spikes)
+MemoryHigh=320M
 
 [Install]
 WantedBy=multi-user.target

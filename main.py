@@ -182,5 +182,5 @@ if __name__ == "__main__":
     logger.info("=" * 70)
     
     # Run Flask app
-    app.run(host="0.0.0.0", port=8080, debug=False, use_reloader=False)
+    app.run(host="0.0.0.0", port=8080, debug=False, use_reloader=False, threaded=True)
 

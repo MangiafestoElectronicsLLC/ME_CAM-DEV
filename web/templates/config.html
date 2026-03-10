@@ -187,6 +187,12 @@
             display: block;
         }
 
+        .notification.info {
+            background: #e3f2fd;
+            color: #1565c0;
+            display: block;
+        }
+
         .divider {
             height: 1px;
             background: #f0f0f0;
@@ -336,11 +342,25 @@
             <!-- Motion Detection -->
             <div class="form-section">
                 <div class="section-title">🎯 Motion Detection</div>
-                <div class="form-group">
-                    <label>Motion Detection Threshold</label>
-                    <input type="number" name="motion_threshold" value="{{ motion_threshold }}" min="0" max="1"
-                        step="0.1">
-                    <div class="help-text">0.0 = very sensitive, 1.0 = not sensitive (default 0.5 = 50%)</div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Sensitivity</label>
+                        <select name="motion_sensitivity_mode">
+                            <option value="relaxed" {% if motion_sensitivity_mode == 'relaxed' %}selected{% endif %}>Low false alerts</option>
+                            <option value="balanced" {% if motion_sensitivity_mode == 'balanced' %}selected{% endif %}>Balanced</option>
+                            <option value="high" {% if motion_sensitivity_mode == 'high' %}selected{% endif %}>Catch more motion</option>
+                        </select>
+                        <div class="help-text">Choose how aggressively the camera should react to movement.</div>
+                    </div>
+                    <div class="form-group">
+                        <label>What should trigger recording?</label>
+                        <select name="motion_trigger_mode">
+                            <option value="all_motion" {% if motion_trigger_mode == 'all_motion' %}selected{% endif %}>Any visible motion, including light and color changes</option>
+                            <option value="people_vehicles" {% if motion_trigger_mode == 'people_vehicles' %}selected{% endif %}>People and vehicles</option>
+                            <option value="people_only" {% if motion_trigger_mode == 'people_only' %}selected{% endif %}>People only</option>
+                        </select>
+                        <div class="help-text">Use Any visible motion if you want motion clips for every meaningful scene change.</div>
+                    </div>
                 </div>
                 <div class="form-group">
                     <div class="checkbox-group">
@@ -350,11 +370,64 @@
                             detected</label>
                     </div>
                 </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Clip Length</label>
+                        <select name="motion_clip_mode" id="motion_clip_mode">
+                            <option value="auto" {% if motion_clip_mode == 'auto' %}selected{% endif %}>Automatic based on motion</option>
+                            <option value="fixed" {% if motion_clip_mode == 'fixed' %}selected{% endif %}>Fixed length</option>
+                        </select>
+                        <div class="help-text">Automatic keeps recording while motion is still happening.</div>
+                    </div>
+                    <div class="form-group">
+                        <label>Fixed Clip Length (seconds)</label>
+                        <input type="number" name="motion_record_duration" value="{{ motion_record_duration }}" min="3"
+                            max="300">
+                        <div class="help-text">Used only when Clip Length is set to Fixed length.</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="divider"></div>
+
+            <div class="form-section">
+                <div class="section-title">📱 Text Alerts</div>
+                <div class="form-group checkbox-group">
+                    <input type="checkbox" id="sms_enabled" name="sms_enabled" {% if sms_enabled %}checked{% endif %}>
+                    <label for="sms_enabled" style="margin: 0; font-weight: 400;">Send text alerts for motion</label>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Text Alert Number</label>
+                        <input type="tel" name="sms_phone_to" value="{{ sms_phone_to }}" placeholder="+1234567890">
+                        <div class="help-text">Use a full phone number including country code.</div>
+                    </div>
+                    <div class="form-group">
+                        <label>Minimum Time Between Texts (minutes)</label>
+                        <input type="number" name="sms_rate_limit" value="{{ sms_rate_limit }}" min="1" max="120">
+                        <div class="help-text">Prevents repeated motion texts from spamming the same number.</div>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Text Delivery Provider</label>
+                        <select name="sms_provider">
+                            <option value="twilio" {% if sms_provider == 'twilio' %}selected{% endif %}>Twilio</option>
+                            <option value="generic_http" {% if sms_provider == 'generic_http' %}selected{% endif %}>Custom HTTP endpoint</option>
+                            <option value="sns" {% if sms_provider == 'sns' %}selected{% endif %}>AWS SNS</option>
+                            <option value="plivo" {% if sms_provider == 'plivo' %}selected{% endif %}>Plivo</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Provider API URL</label>
+                        <input type="text" name="sms_api_url" value="{{ sms_api_url }}" placeholder="https://...">
+                        <div class="help-text">Used for Custom HTTP endpoint delivery.</div>
+                    </div>
+                </div>
                 <div class="form-group">
-                    <label>Record Duration (seconds)</label>
-                    <input type="number" name="motion_record_duration" value="{{ motion_record_duration }}" min="3"
-                        max="300">
-                    <div class="help-text">How long to record after motion is detected (3-300 seconds)</div>
+                    <label>Provider API Key</label>
+                    <input type="password" name="sms_api_key" value="{{ sms_api_key }}" placeholder="API key or token">
+                    <div class="help-text">Stored on the device and used for sending motion texts.</div>
                 </div>
             </div>
 
@@ -389,11 +462,7 @@
                     <div class="help-text">Delete recordings older than this many days to free up space</div>
                 </div>
 
-                <div class="form-group checkbox-group">
-                    <input type="checkbox" id="storage_encrypt" name="storage_encrypt" {% if
-                        config.get('storage_encrypt', False) %}checked{% endif %}>
-                    <label for="storage_encrypt" style="margin: 0; font-weight: 400;">Encrypt recordings at rest</label>
-                </div>
+                <div class="info-box">Motion clips are always encrypted before long-term storage.</div>
                 <div class="form-group">
                     <label>Encrypted Storage Folder</label>
                     <input type="text" name="storage_encrypted_dir"
@@ -492,12 +561,19 @@
                 device_location: document.querySelector('input[name="device_location"]').value,
                 emergency_phone: document.querySelector('input[name="emergency_phone"]').value,
                 send_motion_to_emergency: document.getElementById('send_motion').checked,
-                motion_threshold: parseFloat(document.querySelector('input[name="motion_threshold"]').value),
+                motion_sensitivity_mode: document.querySelector('select[name="motion_sensitivity_mode"]').value,
+                motion_trigger_mode: document.querySelector('select[name="motion_trigger_mode"]').value,
                 motion_record_enabled: document.getElementById('motion_record').checked,
+                motion_clip_mode: document.getElementById('motion_clip_mode').value,
                 motion_record_duration: parseInt(document.querySelector('input[name="motion_record_duration"]').value),
                 storage_cleanup_days: parseInt(document.querySelector('input[name="storage_cleanup_days"]').value),
-                storage_encrypt: document.getElementById('storage_encrypt').checked,
                 storage_encrypted_dir: document.querySelector('input[name="storage_encrypted_dir"]').value,
+                sms_enabled: document.getElementById('sms_enabled').checked,
+                sms_phone_to: document.querySelector('input[name="sms_phone_to"]').value,
+                sms_rate_limit: parseInt(document.querySelector('input[name="sms_rate_limit"]').value),
+                sms_provider: document.querySelector('select[name="sms_provider"]').value,
+                sms_api_url: document.querySelector('input[name="sms_api_url"]').value,
+                sms_api_key: document.querySelector('input[name="sms_api_key"]').value,
                 gdrive_enabled: document.getElementById('gdrive_enabled').checked,
                 gdrive_folder_id: document.querySelector('input[name="gdrive_folder_id"]').value,
                 tailscale_only: document.getElementById('tailscale_only').checked,

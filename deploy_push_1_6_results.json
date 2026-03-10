@@ -1,0 +1,107 @@
+﻿[
+    {
+        "device":  "1",
+        "target":  "",
+        "reachable":  false,
+        "copied":  [
+
+                   ],
+        "copy_failed":  [
+
+                        ],
+        "service_mecamera":  "",
+        "service_mecamlite":  "",
+        "api_preview":  "",
+        "error":  "unreachable"
+    },
+    {
+        "device":  "2",
+        "target":  "mecamdev2.local",
+        "reachable":  true,
+        "copied":  [
+                       "web/app_lite.py",
+                       "web/templates/config.html",
+                       "config/config_default.json",
+                       "src/core/sms_notifier.py"
+                   ],
+        "copy_failed":  [
+
+                        ],
+        "service_mecamera":  "active",
+        "service_mecamlite":  "active",
+        "api_preview":  "",
+        "error":  ""
+    },
+    {
+        "device":  "3",
+        "target":  "mecamdev3.local",
+        "reachable":  true,
+        "copied":  [
+                       "web/app_lite.py",
+                       "web/templates/config.html",
+                       "config/config_default.json",
+                       "src/core/sms_notifier.py"
+                   ],
+        "copy_failed":  [
+
+                        ],
+        "service_mecamera":  "active",
+        "service_mecamlite":  "inactive",
+        "api_preview":  "",
+        "error":  ""
+    },
+    {
+        "device":  "4",
+        "target":  "mecamdev4.local",
+        "reachable":  true,
+        "copied":  [
+                       "web/app_lite.py",
+                       "web/templates/config.html",
+                       "config/config_default.json",
+                       "src/core/sms_notifier.py"
+                   ],
+        "copy_failed":  [
+
+                        ],
+        "service_mecamera":  "active",
+        "service_mecamlite":  "inactive",
+        "api_preview":  "",
+        "error":  ""
+    },
+    {
+        "device":  "5",
+        "target":  "mecamdev5.local",
+        "reachable":  true,
+        "copied":  [
+                       "web/app_lite.py",
+                       "web/templates/config.html",
+                       "config/config_default.json",
+                       "src/core/sms_notifier.py"
+                   ],
+        "copy_failed":  [
+
+                        ],
+        "service_mecamera":  "activating",
+        "service_mecamlite":  "inactive",
+        "api_preview":  "",
+        "error":  ""
+    },
+    {
+        "device":  "6",
+        "target":  "mecamdev6.local",
+        "reachable":  true,
+        "copied":  [
+                       "web/app_lite.py",
+                       "web/templates/config.html",
+                       "config/config_default.json",
+                       "src/core/sms_notifier.py"
+                   ],
+        "copy_failed":  [
+
+                        ],
+        "service_mecamera":  "active",
+        "service_mecamlite":  "inactive",
+        "api_preview":  "",
+        "error":  ""
+    }
+]

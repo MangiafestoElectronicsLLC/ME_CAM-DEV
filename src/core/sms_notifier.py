@@ -283,7 +283,21 @@ def get_sms_notifier():
         from .config_manager import get_config
         try:
             config = get_config()
-            sms_config = config.get("notifications", {}).get("sms", {})
+            sms_config = dict(config.get("notifications", {}).get("sms", {}) or {})
+            sms_config["enabled"] = bool(config.get("sms_enabled", sms_config.get("enabled", False)))
+            sms_config["phone_to"] = config.get("sms_phone_to", sms_config.get("phone_to", ""))
+            sms_config["rate_limit_minutes"] = int(config.get("sms_rate_limit", sms_config.get("rate_limit_minutes", 5)) or 5)
+            sms_config["motion_threshold"] = float(config.get("sms_motion_threshold", sms_config.get("motion_threshold", 0.0)) or 0.0)
+
+            provider = config.get("sms_provider", sms_config.get("provider"))
+            if config.get("sms_api_url"):
+                provider = "generic_http"
+            sms_config["provider"] = provider or "twilio"
+
+            generic_http = dict(sms_config.get("generic_http", {}) or {})
+            generic_http["url"] = config.get("sms_api_url", generic_http.get("url", ""))
+            generic_http["auth_token"] = config.get("sms_api_key", generic_http.get("auth_token", ""))
+            sms_config["generic_http"] = generic_http
             _sms_notifier = SMSNotifier(sms_config)
         except Exception as e:
             logger.error(f"[SMS] Error initializing: {e}")

@@ -122,6 +122,65 @@ def _save_share_links(links: dict) -> None:
         logger.error(f"[SHARE] Failed to save links: {e}")
 
 
+def _detect_arecord_device() -> str | None:
+    preferred = os.environ.get("MECAM_AUDIO_DEVICE", "").strip()
+    if preferred:
+        return preferred
+
+    if not shutil.which("arecord"):
+        return None
+
+    try:
+        result = subprocess.run(
+            ["arecord", "-l"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+        cards = []
+        for line in result.stdout.splitlines():
+            line = line.strip()
+            if not line.startswith("card "):
+                continue
+            try:
+                left, _ = line.split(":", 1)
+                card_part, device_part = left.split(",", 1)
+                card_num = card_part.replace("card", "").strip().split()[0]
+                device_num = device_part.replace("device", "").strip().split()[0]
+                cards.append((card_num, device_num, line.lower()))
+            except Exception:
+                continue
+
+        for card_num, device_num, description in cards:
+            if any(token in description for token in ["usb", "mic", "microphone", "audio"]):
+                return f"plughw:{card_num},{device_num}"
+        if cards:
+            card_num, device_num, _ = cards[0]
+            return f"plughw:{card_num},{device_num}"
+    except Exception as e:
+        logger.warning(f"[AUDIO] Failed to inspect capture devices: {e}")
+
+    return None
+
+
+def _build_arecord_command(audio_path: str, duration_sec: int) -> list[str]:
+    audio_cmd = [
+        "arecord",
+        "-q",
+        "-f", "S16_LE",
+        "-r", "16000",
+        "-c", "1",
+        "-d", str(duration_sec),
+        "-t", "wav",
+    ]
+    device_name = _detect_arecord_device()
+    if device_name:
+        audio_cmd.extend(["-D", device_name])
+    audio_cmd.append(audio_path)
+    return audio_cmd
+
+
 def _get_security_cfg(cfg: dict) -> dict:
     return cfg.get("security", {}) or {}
 
@@ -173,9 +232,149 @@ def _get_storage_cfg(cfg: dict) -> dict:
     return {
         "recordings_dir": storage.get("recordings_dir", "recordings"),
         "encrypted_dir": cfg.get("storage_encrypted_dir", storage.get("encrypted_dir", "recordings_encrypted")),
-        "encrypt": cfg.get("storage_encrypt", storage.get("encrypt", False)),
+        "encrypt": True,
         "retention_days": cfg.get("storage_cleanup_days", storage.get("retention_days", 7))
     }
+
+
+def _get_sms_cfg(cfg: dict) -> dict:
+    notifications = cfg.setdefault("notifications", {})
+    sms_cfg = dict(notifications.get("sms", {}) or {})
+    sms_cfg["enabled"] = bool(cfg.get("sms_enabled", sms_cfg.get("enabled", False)))
+    sms_cfg["phone_to"] = cfg.get("sms_phone_to", sms_cfg.get("phone_to", ""))
+    sms_cfg["rate_limit_minutes"] = int(cfg.get("sms_rate_limit", sms_cfg.get("rate_limit_minutes", 5)) or 5)
+    sms_cfg["motion_threshold"] = 0.0
+
+    provider = sms_cfg.get("provider")
+    if cfg.get("sms_api_url"):
+        provider = "generic_http"
+    sms_cfg["provider"] = provider or "twilio"
+
+    generic_http = dict(sms_cfg.get("generic_http", {}) or {})
+    generic_http["url"] = cfg.get("sms_api_url", generic_http.get("url", ""))
+    generic_http["auth_token"] = cfg.get("sms_api_key", generic_http.get("auth_token", ""))
+    sms_cfg["generic_http"] = generic_http
+
+    notifications["sms"] = sms_cfg
+    cfg["notifications"] = notifications
+    return sms_cfg
+
+
+def _motion_profile_map() -> dict:
+    return {
+        "relaxed": {
+            "threshold": 0.03,
+            "min_area": 900,
+            "ai_sensitivity": 0.55,
+            "max_diff": 90,
+            "motion_percent": 1.8,
+            "edge_motion": 1500,
+            "mean_diff": 18,
+            "clip_min": 8,
+            "clip_mid": 12,
+            "clip_max": 14,
+        },
+        "balanced": {
+            "threshold": 0.02,
+            "min_area": 500,
+            "ai_sensitivity": 0.6,
+            "max_diff": 70,
+            "motion_percent": 1.0,
+            "edge_motion": 900,
+            "mean_diff": 12,
+            "clip_min": 10,
+            "clip_mid": 14,
+            "clip_max": 18,
+        },
+        "high": {
+            "threshold": 0.01,
+            "min_area": 250,
+            "ai_sensitivity": 0.7,
+            "max_diff": 40,
+            "motion_percent": 0.45,
+            "edge_motion": 500,
+            "mean_diff": 7,
+            "clip_min": 12,
+            "clip_mid": 18,
+            "clip_max": 24,
+        },
+    }
+
+
+def _get_motion_profile_settings(cfg: dict) -> dict:
+    sensitivity_mode = cfg.get("motion_sensitivity_mode")
+    if sensitivity_mode not in {"relaxed", "balanced", "high"}:
+        raw_threshold = float(cfg.get("motion_threshold", 0.02) or 0.02)
+        if raw_threshold <= 0.012:
+            sensitivity_mode = "high"
+        elif raw_threshold <= 0.025:
+            sensitivity_mode = "balanced"
+        else:
+            sensitivity_mode = "relaxed"
+
+    trigger_mode = cfg.get("motion_trigger_mode")
+    if trigger_mode not in {"all_motion", "people_vehicles", "people_only"}:
+        trigger_mode = "people_only" if cfg.get("detection", {}).get("person_only", False) else "all_motion"
+
+    clip_mode = cfg.get("motion_clip_mode", "auto")
+    if clip_mode not in {"auto", "fixed"}:
+        clip_mode = "auto"
+
+    settings = dict(_motion_profile_map()[sensitivity_mode])
+    settings["sensitivity_mode"] = sensitivity_mode
+    settings["trigger_mode"] = trigger_mode
+    settings["clip_mode"] = clip_mode
+    return settings
+
+
+def _apply_motion_preferences(cfg: dict, sensitivity_mode: str | None = None, trigger_mode: str | None = None, clip_mode: str | None = None) -> dict:
+    if sensitivity_mode:
+        cfg["motion_sensitivity_mode"] = sensitivity_mode
+    if trigger_mode:
+        cfg["motion_trigger_mode"] = trigger_mode
+    if clip_mode:
+        cfg["motion_clip_mode"] = clip_mode
+
+    settings = _get_motion_profile_settings(cfg)
+    cfg["motion_threshold"] = settings["threshold"]
+    cfg["motion_record_enabled"] = bool(cfg.get("motion_record_enabled", True))
+    cfg.setdefault("detection", {})
+    cfg["detection"]["min_motion_area"] = settings["min_area"]
+    cfg["detection"]["sensitivity"] = settings["ai_sensitivity"]
+    cfg["detection"]["person_only"] = settings["trigger_mode"] == "people_only"
+    cfg["motion_light_change_detection"] = settings["trigger_mode"] == "all_motion"
+    cfg["storage_encrypt"] = True
+    cfg.setdefault("storage", {})
+    cfg["storage"]["encrypt"] = True
+    cfg["storage"]["encrypted_dir"] = cfg.get("storage_encrypted_dir", "recordings_encrypted")
+    return settings
+
+
+def _auto_motion_clip_duration(cfg: dict, motion_ratio: float = 0.0, contour_count: int = 0, mean_diff: float = 0.0, motion_percent: float = 0.0) -> int:
+    settings = _get_motion_profile_settings(cfg)
+    if settings["clip_mode"] != "auto":
+        return max(5, int(cfg.get("motion_record_duration", settings["clip_mid"]) or settings["clip_mid"]))
+
+    score = max(motion_ratio * 100.0, motion_percent) + (contour_count * 0.35) + min(mean_diff, 40.0) / 4.0
+    if score >= 10:
+        return settings["clip_max"]
+    if score >= 5:
+        return settings["clip_mid"]
+    return settings["clip_min"]
+
+
+def _should_extend_motion_capture(previous_gray, current_frame, settings: dict):
+    import cv2
+
+    current_gray = cv2.cvtColor(current_frame, cv2.COLOR_RGB2GRAY)
+    diff = cv2.absdiff(previous_gray, current_gray)
+    blur = cv2.GaussianBlur(diff, (11, 11), 0)
+    _, thresh = cv2.threshold(blur, 24, 255, cv2.THRESH_BINARY)
+    thresh = cv2.dilate(thresh, None, iterations=1)
+    motion_ratio = cv2.countNonZero(thresh) / float(current_gray.shape[0] * current_gray.shape[1])
+    mean_diff = float(diff.mean())
+    active = motion_ratio > (settings["threshold"] * 0.75) or mean_diff > (settings["mean_diff"] * 0.8)
+    return active, current_gray, motion_ratio, mean_diff
 
 
 def _get_gdrive_cfg(cfg: dict) -> dict:
@@ -833,6 +1032,11 @@ def create_lite_app(pi_model, camera_config):
             recordings_path = os.path.join(BASE_DIR, "recordings")
             os.makedirs(recordings_path, exist_ok=True)
 
+            cfg = get_config()
+            motion_settings = _get_motion_profile_settings(cfg)
+            max_duration = motion_settings["clip_max"] if motion_settings["clip_mode"] == "auto" else max(int(duration_sec), motion_settings["clip_min"])
+            min_duration = min(max_duration, max(int(duration_sec), motion_settings["clip_min"]))
+
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"motion_{timestamp}.mp4"
             filepath = os.path.join(recordings_path, filename)
@@ -858,14 +1062,7 @@ def create_lite_app(pi_model, camera_config):
             if shutil.which("arecord"):
                 try:
                     audio_path = os.path.join(recordings_path, f"motion_{timestamp}.wav")
-                    audio_cmd = [
-                        "arecord",
-                        "-f", "S16_LE",
-                        "-r", "16000",
-                        "-d", str(duration_sec),
-                        "-t", "wav",
-                        audio_path
-                    ]
+                    audio_cmd = _build_arecord_command(audio_path, max_duration)
                     audio_proc = subprocess.Popen(audio_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 except Exception as e:
                     logger.warning(f"[AUDIO] Failed to start audio capture: {e}")
@@ -876,12 +1073,25 @@ def create_lite_app(pi_model, camera_config):
             for frame in buffered_frames:
                 writer.write(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
 
-            # Continue capturing for remaining duration
-            additional_frames = int(duration_sec * fps) - len(buffered_frames)
-            for i in range(max(0, additional_frames)):
+            previous_gray = cv2.cvtColor(buffered_frames[-1], cv2.COLOR_RGB2GRAY)
+            min_total_frames = max(len(buffered_frames), int(min_duration * fps))
+            max_total_frames = max(min_total_frames, int(max_duration * fps))
+            additional_frames = 0
+            last_motion_seen = time.time()
+
+            # Continue capturing and extend recording while motion is still active.
+            for i in range(max(0, max_total_frames - len(buffered_frames))):
                 try:
                     next_frame = camera_obj.capture_array()
                     writer.write(cv2.cvtColor(next_frame, cv2.COLOR_RGB2BGR))
+                    additional_frames += 1
+                    active, previous_gray, _, _ = _should_extend_motion_capture(previous_gray, next_frame, motion_settings)
+                    if active:
+                        last_motion_seen = time.time()
+
+                    total_frames_written = len(buffered_frames) + additional_frames
+                    if total_frames_written >= min_total_frames and (time.time() - last_motion_seen) >= 1.5:
+                        break
                     time.sleep(1.0 / fps)
                 except Exception as e:
                     logger.debug(f"[MOTION] Frame {i} capture error: {e}")
@@ -892,7 +1102,7 @@ def create_lite_app(pi_model, camera_config):
             # Wait for audio capture to finish (best-effort)
             if audio_proc:
                 try:
-                    audio_proc.wait(timeout=duration_sec + 2)
+                    audio_proc.wait(timeout=max_duration + 2)
                 except Exception:
                     audio_proc.kill()
                 audio_proc = None
@@ -925,7 +1135,6 @@ def create_lite_app(pi_model, camera_config):
                     except Exception:
                         pass
 
-            cfg = get_config()
             final_path, encrypted = _encrypt_clip_if_enabled(filepath, cfg)
             final_name = os.path.basename(final_path)
 
@@ -1277,6 +1486,8 @@ def create_lite_app(pi_model, camera_config):
         
         cfg = get_config()
         storage = get_storage_info()
+        motion_settings = _get_motion_profile_settings(cfg)
+        sms_cfg = _get_sms_cfg(cfg)
         
         return render_template('config.html',
             device_name=cfg.get('device_name', 'ME Camera'),
@@ -1287,12 +1498,16 @@ def create_lite_app(pi_model, camera_config):
             motion_threshold=cfg.get('motion_threshold', 0.02),
             motion_record_enabled=cfg.get('motion_record_enabled', True),
             motion_record_duration=cfg.get('motion_record_duration', 10),
+            motion_sensitivity_mode=motion_settings['sensitivity_mode'],
+            motion_trigger_mode=motion_settings['trigger_mode'],
+            motion_clip_mode=motion_settings['clip_mode'],
             storage_cleanup_days=cfg.get('storage_cleanup_days', 7),
-            sms_enabled=cfg.get('sms_enabled', False),
-            sms_phone_to=cfg.get('sms_phone_to', ''),
-            sms_api_url=cfg.get('sms_api_url', ''),
-            sms_api_key=cfg.get('sms_api_key', ''),
-            sms_rate_limit=cfg.get('sms_rate_limit', 5),
+            sms_enabled=sms_cfg.get('enabled', False),
+            sms_phone_to=sms_cfg.get('phone_to', ''),
+            sms_api_url=sms_cfg.get('generic_http', {}).get('url', cfg.get('sms_api_url', '')),
+            sms_api_key=sms_cfg.get('generic_http', {}).get('auth_token', cfg.get('sms_api_key', '')),
+            sms_rate_limit=sms_cfg.get('rate_limit_minutes', 5),
+            sms_provider=sms_cfg.get('provider', 'twilio'),
             storage=storage,
             config=cfg
         )
@@ -2030,13 +2245,18 @@ def create_lite_app(pi_model, camera_config):
             cfg['device_location'] = data.get('device_location', cfg.get('device_location'))
             cfg['emergency_phone'] = data.get('emergency_phone', cfg.get('emergency_phone'))
             cfg['send_motion_to_emergency'] = data.get('send_motion_to_emergency', False)
-            cfg['motion_threshold'] = float(data.get('motion_threshold', 0.02))
             cfg['motion_record_enabled'] = data.get('motion_record_enabled', True)
-            cfg['motion_record_duration'] = int(data.get('motion_record_duration', 10))
+            cfg['motion_record_duration'] = int(data.get('motion_record_duration', cfg.get('motion_record_duration', 10) or 10))
             cfg['storage_cleanup_days'] = int(data.get('storage_cleanup_days', 7))
             cfg['nanny_cam_enabled'] = data.get('nanny_cam_enabled', False)
-            cfg['storage_encrypt'] = data.get('storage_encrypt', cfg.get('storage_encrypt', False))
-            cfg['storage_encrypted_dir'] = data.get('storage_encrypted_dir', cfg.get('storage_encrypted_dir', 'recordings_encrypted'))
+            cfg['storage_encrypt'] = True
+            cfg['storage_encrypted_dir'] = data.get('storage_encrypted_dir', cfg.get('storage_encrypted_dir', 'recordings_encrypted')) or 'recordings_encrypted'
+            _apply_motion_preferences(
+                cfg,
+                sensitivity_mode=data.get('motion_sensitivity_mode', cfg.get('motion_sensitivity_mode', 'balanced')),
+                trigger_mode=data.get('motion_trigger_mode', cfg.get('motion_trigger_mode', 'all_motion')),
+                clip_mode=data.get('motion_clip_mode', cfg.get('motion_clip_mode', 'auto')),
+            )
 
             # WiFi settings
             cfg['wifi_enabled'] = data.get('wifi_enabled', cfg.get('wifi_enabled', True))
@@ -2050,6 +2270,18 @@ def create_lite_app(pi_model, camera_config):
             cfg['sms_api_url'] = data.get('sms_api_url', '')
             cfg['sms_api_key'] = data.get('sms_api_key', '')
             cfg['sms_rate_limit'] = int(data.get('sms_rate_limit', 5))
+            sms_cfg = _get_sms_cfg(cfg)
+            requested_provider = data.get('sms_provider')
+            if requested_provider:
+                sms_cfg['provider'] = requested_provider
+            sms_cfg['enabled'] = bool(cfg['sms_enabled'] and cfg['sms_phone_to'])
+            sms_cfg['phone_to'] = cfg['sms_phone_to']
+            sms_cfg['rate_limit_minutes'] = cfg['sms_rate_limit']
+            sms_cfg['motion_threshold'] = 0.0
+            sms_cfg.setdefault('generic_http', {})
+            sms_cfg['generic_http']['url'] = cfg['sms_api_url']
+            sms_cfg['generic_http']['auth_token'] = cfg['sms_api_key']
+            cfg['notifications']['sms'] = sms_cfg
 
             # Cloud sync configuration
             cfg['gdrive_enabled'] = data.get('gdrive_enabled', cfg.get('gdrive_enabled', False))
@@ -2065,10 +2297,12 @@ def create_lite_app(pi_model, camera_config):
             # Keep nested storage settings in sync for other modules
             cfg.setdefault('storage', {})
             cfg['storage']['retention_days'] = int(data.get('storage_cleanup_days', 7))
-            cfg['storage']['encrypt'] = cfg.get('storage_encrypt', False)
+            cfg['storage']['encrypt'] = True
             cfg['storage']['encrypted_dir'] = cfg.get('storage_encrypted_dir', 'recordings_encrypted')
             
             save_config(cfg)
+            from src.core import reset_sms_notifier
+            reset_sms_notifier()
             if cfg.get('wifi_ssid', '') != previous_ssid or cfg.get('wifi_password', '') != previous_password:
                 rotate_enrollment_key(reason='wifi_change')
                 logger.warning("[SECURITY] Enrollment key rotated due to WiFi/config change")
@@ -2256,7 +2490,7 @@ def create_lite_app(pi_model, camera_config):
         from threading import Thread
         
         last_frame = None
-        motion_cooldown = 0
+        motion_cooldown_until = 0.0
         # Circular buffer for pre-motion frames (2-3 seconds at 20 FPS = 40-60 frames)
         frame_buffer = deque(maxlen=60)
         buffer_size = 60 if pi_model.get('ram_mb', 1024) <= 512 else 120
@@ -2268,12 +2502,13 @@ def create_lite_app(pi_model, camera_config):
         recording_start = None
         no_frame_count = 0
         motion_streak = 0
+        stream_error_count = 0
         
-        def save_video_async(frames_list, event_id):
+        def save_video_async(frames_list, event_id, duration_sec=5):
             """Save video in background thread to avoid blocking stream"""
             try:
-                if len(frames_list) < 10:
-                    logger.warning("[MOTION] Insufficient frames for video")
+                if not frames_list:
+                    logger.warning("[MOTION] No frames available for video")
                     return
                 
                 recordings_path = os.path.join(BASE_DIR, "recordings")
@@ -2301,9 +2536,32 @@ def create_lite_app(pi_model, camera_config):
                     logger.error("[MOTION] Could not open video writer")
                     return
                 
-                # Write all frames
+                # Write pre-motion frames first
                 for frame in frames_list:
                     out.write(frame)
+
+                # Continue appending live frames without buffering entire clip in RAM
+                target_frames = max(len(frames_list), int(max(3, duration_sec) * fps))
+                appended_frames = len(frames_list)
+                append_deadline = time.time() + max(3, duration_sec) + 1
+
+                while appended_frames < target_frames and time.time() < append_deadline:
+                    next_frame = None
+                    if hasattr(camera, 'get_jpeg_frame'):
+                        live_jpeg = camera.get_jpeg_frame()
+                        if live_jpeg:
+                            live_np = np.frombuffer(live_jpeg, np.uint8)
+                            next_frame = cv2.imdecode(live_np, cv2.IMREAD_COLOR)
+                    elif hasattr(camera, 'capture_array'):
+                        live_arr = camera.capture_array()
+                        if live_arr is not None:
+                            next_frame = cv2.cvtColor(live_arr, cv2.COLOR_RGB2BGR)
+
+                    if next_frame is not None:
+                        out.write(next_frame)
+                        appended_frames += 1
+
+                    time.sleep(1.0 / fps)
                 
                 out.release()
                 
@@ -2311,7 +2569,7 @@ def create_lite_app(pi_model, camera_config):
                 final_path, encrypted = _encrypt_clip_if_enabled(video_path, cfg)
                 final_name = os.path.basename(final_path)
                 file_size = os.path.getsize(final_path) / (1024 * 1024)
-                logger.success(f"[MOTION] Video saved: {final_name} ({file_size:.1f}MB, {len(frames_list)} frames)")
+                logger.success(f"[MOTION] Video saved: {final_name} ({file_size:.1f}MB, {appended_frames} frames)")
                 
                 # Update motion event with video path
                 try:
@@ -2378,6 +2636,7 @@ def create_lite_app(pi_model, camera_config):
                         continue
 
                     no_frame_count = 0
+                    stream_error_count = 0
                     
                     frame_count += 1
                     
@@ -2406,58 +2665,69 @@ def create_lite_app(pi_model, camera_config):
                                     motion_ratio = motion_pixels / total_pixels
                                     
                                     cfg = get_config()
-                                    motion_threshold = max(0.006, float(cfg.get('motion_threshold', 0.02)))
-                                    min_area = int(cfg.get('detection', {}).get('min_motion_area', 500))
+                                    motion_settings = _get_motion_profile_settings(cfg)
+                                    motion_threshold = motion_settings['threshold']
+                                    min_area = motion_settings['min_area']
+                                    trigger_mode = motion_settings['trigger_mode']
                                     contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
                                     significant_contours = sum(1 for c in contours if cv2.contourArea(c) >= min_area)
-                                    trigger_now = motion_ratio > motion_threshold and significant_contours > 0
+                                    trigger_now = motion_ratio > motion_threshold and (significant_contours > 0 or trigger_mode == 'all_motion')
                                     motion_streak = (motion_streak + 1) if trigger_now else max(0, motion_streak - 1)
                                     
+                                    cfg = get_config()
+                                    nanny_cam = cfg.get('nanny_cam_enabled', False)
+                                    motion_enabled = cfg.get('motion_record_enabled', True)
+
                                     # Motion detected and not in cooldown
-                                    if motion_streak >= 3 and motion_cooldown == 0:
-                                        logger.info(f"[MOTION] Motion detected: {motion_ratio*100:.1f}% pixels")
-                                        
-                                        # Log motion event and get event_id
-                                        event_data = log_motion_event('motion', motion_ratio, {
-                                            'threshold': motion_threshold,
-                                            'contours': significant_contours,
-                                            'motion_pixels': motion_pixels
-                                        })
-                                        event_id = event_data.get('id') if event_data else f"evt_{int(time.time()*1000)}"
-                                        
-                                        # Start recording
-                                        recording = True
-                                        recording_frames = list(frame_buffer)  # Pre-motion frames
-                                        recording_start = time.time()
-                                        motion_cooldown = 45  # ~1.5 seconds cooldown
-                                        motion_streak = 0
-                                        
-                                        logger.info(f"[MOTION] Recording started with {len(recording_frames)} pre-motion frames")
+                                    cooldown_active = time.time() < motion_cooldown_until
+                                    if motion_streak >= 2 and not cooldown_active and not recording:
+                                        if nanny_cam or not motion_enabled:
+                                            motion_streak = 0
+                                        else:
+                                            logger.info(f"[MOTION] Motion detected: {motion_ratio*100:.1f}% pixels")
+
+                                            # Log motion event and get event_id
+                                            event_data = log_motion_event('motion', motion_ratio, {
+                                                'threshold': motion_threshold,
+                                                'contours': significant_contours,
+                                                'motion_pixels': motion_pixels,
+                                                'trigger_mode': trigger_mode,
+                                                'sensitivity_mode': motion_settings['sensitivity_mode']
+                                            })
+                                            event_id = event_data.get('id') if event_data else f"evt_{int(time.time()*1000)}"
+
+                                            # Keep a small pre-motion buffer on Pi Zero to reduce memory pressure
+                                            pre_frames = list(frame_buffer)[-24:] if pi_model.get('ram_mb', 1024) <= 512 else list(frame_buffer)
+                                            duration_sec = _auto_motion_clip_duration(cfg, motion_ratio=motion_ratio, contour_count=significant_contours)
+                                            video_thread = Thread(
+                                                target=save_video_async,
+                                                args=(pre_frames, event_id, duration_sec),
+                                                daemon=True
+                                            )
+                                            video_thread.start()
+
+                                            recording = True
+                                            recording_start = time.time()
+                                            cooldown_seconds = float(cfg.get('motion_cooldown_seconds', 1.0) or 1.0)
+                                            cooldown_seconds = min(10.0, max(0.2, cooldown_seconds))
+                                            motion_cooldown_until = time.time() + cooldown_seconds
+                                            motion_streak = 0
+
+                                            logger.info(f"[MOTION] Recording started with {len(pre_frames)} pre-motion frames")
                                 
                                 last_frame = gray
                     except Exception as e:
                         logger.debug(f"[MOTION] Frame processing error: {e}")
                     
-                    # Continue recording for 5 seconds after motion
+                    # Clear recording flag after duration; saving happens in background thread
                     if recording:
-                        recording_frames.append(frame.copy())
-                        
                         if time.time() - recording_start > 5:
                             recording = False
-                            logger.info(f"[MOTION] Recording complete: {len(recording_frames)} total frames")
-                            
-                            # Save video in background thread
-                            video_thread = Thread(target=save_video_async, args=(recording_frames, event_id), daemon=True)
-                            video_thread.start()
-                            
-                            recording_frames = []
-                    
-                    if motion_cooldown > 0:
-                        motion_cooldown -= 1
+                            logger.info("[MOTION] Recording window complete")
                     
                     yield (b'--frame\r\n'
                            b'Content-Type: image/jpeg\r\n\r\n' + jpeg_bytes + b'\r\n')
-                    time.sleep(0.0167)  # ~60 FPS for ultra-responsive streaming
+                    time.sleep(0.03)  # ~33 FPS to reduce CPU and memory pressure on Pi Zero
                     continue
                 
                 # picamera2 - get array and convert
@@ -2508,9 +2778,7 @@ def create_lite_app(pi_model, camera_config):
                     frame_buffer.pop(0)  # Remove oldest
                 
                 # Motion detection - check every frame for responsiveness
-                if motion_cooldown > 0:
-                    motion_cooldown -= 1
-                else:
+                if time.time() >= motion_cooldown_until:
                     if last_frame is not None and not recording:
                         # Advanced motion detection - filter out shadows and lighting
                         diff = cv2.absdiff(last_frame, gray)
@@ -2534,7 +2802,10 @@ def create_lite_app(pi_model, camera_config):
                         
                         # Contour-based filtering to ignore tiny movements (leaves, shadows)
                         contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                        min_area = 1200  # tuned for 640x480; ignores tiny motion
+                        cfg = get_config()
+                        motion_settings = _get_motion_profile_settings(cfg)
+                        trigger_mode = motion_settings['trigger_mode']
+                        min_area = motion_settings['min_area']
                         allowed_labels = []
                         for c in contours:
                             area = cv2.contourArea(c)
@@ -2547,16 +2818,22 @@ def create_lite_app(pi_model, camera_config):
                             elif 0.8 < aspect <= 3.5:
                                 allowed_labels.append("vehicle")
 
+                        if trigger_mode == 'people_only':
+                            label_match = 'person' in allowed_labels
+                        elif trigger_mode == 'people_vehicles':
+                            label_match = len(allowed_labels) > 0
+                        else:
+                            label_match = len(contours) > 0
+
                         motion = (
-                            max_diff > 75 and            # more sensitive contrast detection
-                            motion_percent > 1.2 and     # lower threshold for faster detection
-                            edge_motion > 1000 and       # slightly more permissive edges
-                            mean_diff > 15 and
-                            len(allowed_labels) > 0      # only accept person/vehicle-shaped contours
+                            max_diff > motion_settings['max_diff'] and
+                            motion_percent > motion_settings['motion_percent'] and
+                            edge_motion > motion_settings['edge_motion'] and
+                            mean_diff > motion_settings['mean_diff'] and
+                            label_match
                         )
                         
                         if motion:
-                            cfg = get_config()
                             nanny_cam = cfg.get('nanny_cam_enabled', False)
 
                             if not nanny_cam and cfg.get('motion_record_enabled', True):
@@ -2564,7 +2841,13 @@ def create_lite_app(pi_model, camera_config):
                                 recording = True
                                 try:
                                     # Save clip using buffered frames + continue recording
-                                    clip_file = save_motion_clip_buffered(camera, frame_buffer.copy(), duration_sec=5)
+                                    clip_duration = _auto_motion_clip_duration(
+                                        cfg,
+                                        contour_count=len(contours),
+                                        mean_diff=mean_diff,
+                                        motion_percent=motion_percent,
+                                    )
+                                    clip_file = save_motion_clip_buffered(camera, frame_buffer.copy(), duration_sec=clip_duration)
                                     video_path = clip_file
                                     if not clip_file:
                                         # Fallback to snapshot if clip fails
@@ -2635,7 +2918,9 @@ def create_lite_app(pi_model, camera_config):
                                     recording = False
 
                             # Cooldown: 20 frames (~1 sec) to avoid duplicate triggers
-                            motion_cooldown = 20
+                            cooldown_seconds = float(cfg.get('motion_cooldown_seconds', 1.0) or 1.0)
+                            cooldown_seconds = min(10.0, max(0.2, cooldown_seconds))
+                            motion_cooldown_until = time.time() + cooldown_seconds
                 
                 last_frame = gray
                 
@@ -2655,8 +2940,19 @@ def create_lite_app(pi_model, camera_config):
                 
                 time.sleep(0.033)  # ~30 FPS for better responsiveness
             except Exception as e:
-                logger.debug(f"[CAMERA] Frame error: {e}")
-                break
+                stream_error_count += 1
+                logger.warning(f"[CAMERA] Frame error ({stream_error_count}): {e}")
+                if stream_error_count >= 20 and hasattr(camera, 'restart'):
+                    try:
+                        logger.warning("[CAMERA] Repeated frame errors, restarting camera backend...")
+                        if camera.restart():
+                            stream_error_count = 0
+                            no_frame_count = 0
+                            logger.success("[CAMERA] Camera backend restarted")
+                    except Exception as restart_error:
+                        logger.error(f"[CAMERA] Backend restart failed: {restart_error}")
+                time.sleep(0.1)
+                continue
     
     def generate_test_pattern():
         """Generate test pattern"""

@@ -8,6 +8,9 @@
   "send_motion_to_emergency": false,
   "alert_cooldown": 5,
   "motion_threshold": 0.02,
+  "motion_sensitivity_mode": "balanced",
+  "motion_trigger_mode": "all_motion",
+  "motion_clip_mode": "auto",
   "motion_record_enabled": true,
   "motion_record_duration": 10,
   "nanny_cam_enabled": false,
@@ -16,7 +19,7 @@
   "sms_api_url": "",
   "sms_api_key": "",
   "sms_rate_limit": 5,
-  "storage_encrypt": false,
+  "storage_encrypt": true,
   "storage_encrypted_dir": "recordings_encrypted",
   "gdrive_enabled": false,
   "gdrive_folder_id": "",
@@ -87,7 +90,7 @@
     "organize_by_date": true
   },
   "detection": {
-    "person_only": true,
+    "person_only": false,
     "sensitivity": 0.6,
     "min_motion_area": 500
   },
@@ -100,7 +103,7 @@
       "enabled": false,
       "provider": "twilio",
       "rate_limit_minutes": 5,
-      "motion_threshold": 0.5,
+      "motion_threshold": 0.0,
       "phone_to": "",
       "twilio": {
         "account_sid": "",
