@@ -18,7 +18,7 @@ import signal
 
 
 class RpicamStreamer:
-    """Stream camera via rpicam-jpeg subprocess - persistent connection"""
+    """Stream camera via rpicam/libcamera still-image subprocess - persistent connection"""
     
     def __init__(self, width=640, height=480, fps=15, timeout=5, quality=95, rotation=0, hflip=False, vflip=False):
         self.width = width
@@ -40,30 +40,47 @@ class RpicamStreamer:
         self.capture_timeout = 2  # Individual capture timeout in seconds (reduced for faster response)
         self.consecutive_failures = 0
         
-        # Verify rpicam-jpeg is available
+        # Verify camera still-capture binary is available.
         self.rpicam_path = self._find_rpicam()
         if not self.rpicam_path:
-            logger.error("[RPICAM] rpicam-jpeg not found in PATH")
-            raise RuntimeError("rpicam-jpeg not installed")
+            logger.error("[RPICAM] No compatible rpicam/libcamera still binary found in PATH")
+            raise RuntimeError("rpicam or libcamera still binary not installed")
     
     def _find_rpicam(self):
-        """Find rpicam-jpeg binary"""
-        try:
-            result = subprocess.run(['which', 'rpicam-jpeg'], 
-                                  capture_output=True, text=True, timeout=2)
-            if result.returncode == 0:
-                path = result.stdout.strip()
-                logger.info(f"[RPICAM] Found at: {path}")
-                return path
-        except:
-            pass
-        
-        # Try common paths
-        for path in ['/usr/bin/rpicam-jpeg', '/usr/local/bin/rpicam-jpeg']:
+        """Find the first available still-capture binary in priority order."""
+        candidates = [
+            'rpicam-jpeg',
+            'libcamera-jpeg',
+            'rpicam-still',
+            'libcamera-still',
+        ]
+
+        for binary in candidates:
+            try:
+                result = subprocess.run(['which', binary], capture_output=True, text=True, timeout=2)
+                if result.returncode == 0:
+                    path = result.stdout.strip()
+                    logger.info(f"[RPICAM] Using camera binary: {path}")
+                    return path
+            except Exception:
+                continue
+
+        # Try common explicit paths as fallback.
+        common_paths = [
+            '/usr/bin/rpicam-jpeg',
+            '/usr/local/bin/rpicam-jpeg',
+            '/usr/bin/libcamera-jpeg',
+            '/usr/local/bin/libcamera-jpeg',
+            '/usr/bin/rpicam-still',
+            '/usr/local/bin/rpicam-still',
+            '/usr/bin/libcamera-still',
+            '/usr/local/bin/libcamera-still',
+        ]
+        for path in common_paths:
             if os.path.exists(path):
-                logger.info(f"[RPICAM] Found at: {path}")
+                logger.info(f"[RPICAM] Using camera binary: {path}")
                 return path
-        
+
         return None
     
     def _start_persistent_process(self):
@@ -263,10 +280,12 @@ class RpicamStreamer:
 
 
 def is_rpicam_available():
-    """Check if rpicam-jpeg is available"""
+    """Check if any supported rpicam/libcamera still binary is available."""
     try:
-        result = subprocess.run(['which', 'rpicam-jpeg'], 
-                              capture_output=True, timeout=2)
-        return result.returncode == 0
-    except:
+        for binary in ('rpicam-jpeg', 'libcamera-jpeg', 'rpicam-still', 'libcamera-still'):
+            result = subprocess.run(['which', binary], capture_output=True, timeout=2)
+            if result.returncode == 0:
+                return True
+        return False
+    except Exception:
         return False

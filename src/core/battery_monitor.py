@@ -71,12 +71,39 @@ class BatteryMonitor:
         is_low = undervolt_now or (percent is not None and percent <= self.low_threshold_percent)
         external_power = not undervolt_now
         
-        # Runtime estimate (only meaningful when capacity percentage is known)
-        powerbank_mah = 10000
-        avg_current_draw_ma = 380
+        # Runtime estimate (only meaningful when capacity percentage is known).
+        # Defaults reflect common USB power-bank conversion losses.
+        try:
+            powerbank_mah = float(cfg.get("powerbank_capacity_mah", 10000) or 10000)
+        except Exception:
+            powerbank_mah = 10000.0
+
+        try:
+            powerbank_cell_voltage = float(cfg.get("powerbank_cell_voltage", 3.7) or 3.7)
+        except Exception:
+            powerbank_cell_voltage = 3.7
+
+        try:
+            device_voltage = float(cfg.get("device_voltage", 5.0) or 5.0)
+        except Exception:
+            device_voltage = 5.0
+
+        try:
+            conversion_efficiency = float(cfg.get("power_conversion_efficiency", 0.85) or 0.85)
+        except Exception:
+            conversion_efficiency = 0.85
+        conversion_efficiency = max(0.5, min(1.0, conversion_efficiency))
+
+        try:
+            avg_current_draw_ma = float(cfg.get("avg_current_draw_ma", 300) or 300)
+        except Exception:
+            avg_current_draw_ma = 300.0
+        avg_current_draw_ma = max(50.0, avg_current_draw_ma)
+
+        usable_mah_at_device_voltage = powerbank_mah * (powerbank_cell_voltage / device_voltage) * conversion_efficiency
 
         if percent is not None and percent > 0:
-            remaining_mah = (percent / 100.0) * powerbank_mah
+            remaining_mah = (percent / 100.0) * usable_mah_at_device_voltage
             runtime_hours = remaining_mah / avg_current_draw_ma
             runtime_hours_int = int(runtime_hours)
             runtime_minutes = int((runtime_hours - runtime_hours_int) * 60)
@@ -93,5 +120,5 @@ class BatteryMonitor:
             "runtime_hours": runtime_hours_int,
             "runtime_minutes": runtime_minutes,
             "percent_source": percent_source,
-            "note": "Battery level uses sensor/override when available; otherwise power-state fallback"
+            "note": "Battery level uses sensor/override when available; runtime is an estimate based on configured power-bank/current settings"
         }

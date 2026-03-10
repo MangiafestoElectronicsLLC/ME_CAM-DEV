@@ -19,7 +19,7 @@ from src.core import (
     BatteryMonitor, extract_thumbnail, generate_setup_qr,
     log_motion_event, get_recent_events, get_event_statistics, export_events_csv,
     get_sms_notifier, verify_enrollment_key, ensure_enrollment_key,
-    rotate_enrollment_key
+    rotate_enrollment_key, resolve_sms_config
 )
 from src.camera import (
     camera_coordinator, LibcameraStreamer, is_libcamera_available,
@@ -1340,7 +1340,7 @@ def api_log_motion():
         try:
             sms_notifier = get_sms_notifier()
             config = get_config()
-            sms_config = config.get("notifications", {}).get("sms", {})
+            sms_config = resolve_sms_config(config)
             
             if sms_config.get("enabled") and event_type in ["motion", "person", "intrusion", "security_alert"]:
                 phone_to = sms_config.get("phone_to")

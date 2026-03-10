@@ -276,6 +276,53 @@ class SMSNotifier:
 _sms_notifier = None
 
 
+def resolve_sms_config(config: dict) -> dict:
+    """Build a normalized SMS config from legacy and nested config keys."""
+    notifications = dict(config.get("notifications", {}) or {})
+    sms_config = dict(notifications.get("sms", {}) or {})
+
+    legacy_enabled = config.get("sms_enabled")
+    legacy_phone = (config.get("sms_phone_to") or "").strip()
+    legacy_api_url = (config.get("sms_api_url") or "").strip()
+    legacy_api_key = (config.get("sms_api_key") or "").strip()
+    legacy_provider = (config.get("sms_provider") or "").strip()
+
+    phone_to = legacy_phone or (sms_config.get("phone_to") or "")
+
+    # Prefer explicit legacy values if present; otherwise keep nested value.
+    if legacy_enabled is None:
+        enabled = bool(sms_config.get("enabled", False))
+    else:
+        enabled = bool(legacy_enabled)
+
+    try:
+        rate_limit = int(config.get("sms_rate_limit", sms_config.get("rate_limit_minutes", 5)) or 5)
+    except Exception:
+        rate_limit = 5
+
+    try:
+        motion_threshold = float(config.get("sms_motion_threshold", sms_config.get("motion_threshold", 0.0)) or 0.0)
+    except Exception:
+        motion_threshold = 0.0
+
+    provider = legacy_provider or (sms_config.get("provider") or "twilio")
+    if legacy_api_url:
+        provider = "generic_http"
+
+    generic_http = dict(sms_config.get("generic_http", {}) or {})
+    generic_http["url"] = legacy_api_url or generic_http.get("url", "")
+    generic_http["auth_token"] = legacy_api_key or generic_http.get("auth_token", "")
+
+    sms_config["enabled"] = enabled
+    sms_config["phone_to"] = phone_to
+    sms_config["rate_limit_minutes"] = max(1, rate_limit)
+    sms_config["motion_threshold"] = max(0.0, min(1.0, motion_threshold))
+    sms_config["provider"] = provider
+    sms_config["generic_http"] = generic_http
+
+    return sms_config
+
+
 def get_sms_notifier():
     """Get or create SMS notifier instance"""
     global _sms_notifier
@@ -283,21 +330,7 @@ def get_sms_notifier():
         from .config_manager import get_config
         try:
             config = get_config()
-            sms_config = dict(config.get("notifications", {}).get("sms", {}) or {})
-            sms_config["enabled"] = bool(config.get("sms_enabled", sms_config.get("enabled", False)))
-            sms_config["phone_to"] = config.get("sms_phone_to", sms_config.get("phone_to", ""))
-            sms_config["rate_limit_minutes"] = int(config.get("sms_rate_limit", sms_config.get("rate_limit_minutes", 5)) or 5)
-            sms_config["motion_threshold"] = float(config.get("sms_motion_threshold", sms_config.get("motion_threshold", 0.0)) or 0.0)
-
-            provider = config.get("sms_provider", sms_config.get("provider"))
-            if config.get("sms_api_url"):
-                provider = "generic_http"
-            sms_config["provider"] = provider or "twilio"
-
-            generic_http = dict(sms_config.get("generic_http", {}) or {})
-            generic_http["url"] = config.get("sms_api_url", generic_http.get("url", ""))
-            generic_http["auth_token"] = config.get("sms_api_key", generic_http.get("auth_token", ""))
-            sms_config["generic_http"] = generic_http
+            sms_config = resolve_sms_config(config)
             _sms_notifier = SMSNotifier(sms_config)
         except Exception as e:
             logger.error(f"[SMS] Error initializing: {e}")

@@ -9,7 +9,7 @@ from .thumbnail_gen import extract_thumbnail
 from .qr_generator import generate_setup_qr
 from .emergency_handler import EmergencyHandler
 from .motion_logger import log_motion_event, get_recent_events, get_event_statistics, clear_old_events, export_events_csv
-from .sms_notifier import SMSNotifier, get_sms_notifier, reset_sms_notifier
+from .sms_notifier import SMSNotifier, get_sms_notifier, reset_sms_notifier, resolve_sms_config
 
 __all__ = [
     'get_config', 'save_config', 'is_first_run', 'mark_first_run_complete',
@@ -18,5 +18,5 @@ __all__ = [
     'BatteryMonitor', 'extract_thumbnail', 'generate_setup_qr',
     'EmergencyHandler', 'log_motion_event', 'get_recent_events', 
     'get_event_statistics', 'clear_old_events', 'export_events_csv',
-    'SMSNotifier', 'get_sms_notifier', 'reset_sms_notifier'
+    'SMSNotifier', 'get_sms_notifier', 'reset_sms_notifier', 'resolve_sms_config'
 ]

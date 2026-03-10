@@ -90,24 +90,8 @@ Find your Pi's IP address from your router, or use hostname:
 
 ```bash
 ssh pi@mecamdev1.local  # Device 1
-# or
-ssh pi@mecamdev2.local  # Device 2
-# or
-ssh pi@mecamdev3.local  # Device 3 (Pi Zero 2W)
-# or
-ssh pi@mecamdev4.local  # Device 4 (Pi Zero 2W)
-# or
-ssh pi@mecamdev5.local  # Device 5
-# or
-ssh pi@mecamdev6.local  # Device 6
-# or
-ssh pi@mecamdev7.local  # Device 7 (Pi 5 - 4GB)
-# Enter your password when prompted
+
 ```
-
-**Expected:** `pi@mecamdev3:~ $` or `pi@mecamdev7:~ $`
-
----
 
 ## Step 3: Install ME_CAM (20 minutes)
 
@@ -192,14 +176,18 @@ pip install -r requirements.txt
 Use the built-in generator instead of creating `config.json` manually:
 
 ```bash
-# Device 3 (Pi Zero 2W + IMX519)
-python3 scripts/generate_config.py --profile device3
+# Devices 1-3 (Pi Zero 2W baseline / IMX519)
+python3 scripts/generate_config.py --profile device1
+python3 scripts/generate_config.py --profile device2 --force
+python3 scripts/generate_config.py --profile device3 --force
 
-# Device 4 (Pi Zero 2W + OV547)
+# Devices 4-6 (OV547/camera-swap friendly profiles)
 python3 scripts/generate_config.py --profile device4
+python3 scripts/generate_config.py --profile device5 --force
+python3 scripts/generate_config.py --profile device6 --force
 
 # Device 7 (Pi 5 testing/hub)
-python3 scripts/generate_config.py --profile device7
+python3 scripts/generate_config.py --profile device7 --force
 ```
 
 If `config/config.json` already exists (re-run on same device), use `--force`:

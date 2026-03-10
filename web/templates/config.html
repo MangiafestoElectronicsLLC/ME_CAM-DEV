@@ -97,6 +97,7 @@
         }
 
         input[type="text"],
+        input[type="password"],
         input[type="tel"],
         input[type="number"],
         select {
@@ -109,6 +110,7 @@
         }
 
         input[type="text"]:focus,
+        input[type="password"]:focus,
         input[type="tel"]:focus,
         input[type="number"]:focus,
         select:focus {
@@ -253,6 +255,43 @@
         .loading.active {
             display: block;
         }
+
+        .secondary-button {
+            background: #eef2ff;
+            color: #3249b7;
+            padding: 10px 14px;
+            border: 1px solid #ccd6ff;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            margin-top: 10px;
+            transition: all 0.2s;
+        }
+
+        .secondary-button:hover {
+            background: #dfe7ff;
+        }
+
+        .advanced-box {
+            border: 1px solid #e8ecff;
+            border-radius: 10px;
+            padding: 12px;
+            margin-top: 12px;
+            background: #fafbff;
+        }
+
+        .password-row {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 8px;
+            align-items: center;
+        }
+
+        @media (max-width: 700px) {
+            .password-row {
+                grid-template-columns: 1fr;
+            }
+        }
     </style>
 </head>
 
@@ -332,8 +371,8 @@
                     <div class="help-text">Emergency alerts will be triggered when motion is detected</div>
                 </div>
                 <div class="info-box">
-                    💡 Configure your emergency service API endpoint in the code to actually send alerts. Currently logs
-                    to system.
+                    Emergency number is also used as fallback for text alerts when motion texts are enabled and the Text
+                    Alert Number is blank.
                 </div>
             </div>
 
@@ -346,20 +385,27 @@
                     <div class="form-group">
                         <label>Sensitivity</label>
                         <select name="motion_sensitivity_mode">
-                            <option value="relaxed" {% if motion_sensitivity_mode == 'relaxed' %}selected{% endif %}>Low false alerts</option>
-                            <option value="balanced" {% if motion_sensitivity_mode == 'balanced' %}selected{% endif %}>Balanced</option>
-                            <option value="high" {% if motion_sensitivity_mode == 'high' %}selected{% endif %}>Catch more motion</option>
+                            <option value="relaxed" {% if motion_sensitivity_mode=='relaxed' %}selected{% endif %}>Low
+                                false alerts</option>
+                            <option value="balanced" {% if motion_sensitivity_mode=='balanced' %}selected{% endif %}>
+                                Balanced</option>
+                            <option value="high" {% if motion_sensitivity_mode=='high' %}selected{% endif %}>Catch more
+                                motion</option>
                         </select>
                         <div class="help-text">Choose how aggressively the camera should react to movement.</div>
                     </div>
                     <div class="form-group">
                         <label>What should trigger recording?</label>
                         <select name="motion_trigger_mode">
-                            <option value="all_motion" {% if motion_trigger_mode == 'all_motion' %}selected{% endif %}>Any visible motion, including light and color changes</option>
-                            <option value="people_vehicles" {% if motion_trigger_mode == 'people_vehicles' %}selected{% endif %}>People and vehicles</option>
-                            <option value="people_only" {% if motion_trigger_mode == 'people_only' %}selected{% endif %}>People only</option>
+                            <option value="all_motion" {% if motion_trigger_mode=='all_motion' %}selected{% endif %}>Any
+                                visible motion, including light and color changes</option>
+                            <option value="people_vehicles" {% if motion_trigger_mode=='people_vehicles' %}selected{%
+                                endif %}>People and vehicles</option>
+                            <option value="people_only" {% if motion_trigger_mode=='people_only' %}selected{% endif %}>
+                                People only</option>
                         </select>
-                        <div class="help-text">Use Any visible motion if you want motion clips for every meaningful scene change.</div>
+                        <div class="help-text">Use Any visible motion if you want motion clips for every meaningful
+                            scene change.</div>
                     </div>
                 </div>
                 <div class="form-group">
@@ -370,12 +416,24 @@
                             detected</label>
                     </div>
                 </div>
+                <div class="form-group">
+                    <div class="checkbox-group">
+                        <input type="checkbox" name="audio_record_on_motion" id="audio_record_on_motion" {% if
+                            audio_record_on_motion %}checked{% endif %}>
+                        <label for="audio_record_on_motion" style="margin: 0; font-weight: 400;">Include microphone
+                            audio in motion clips</label>
+                    </div>
+                    <div class="help-text">Requires USB mic and arecord. Video-only recording continues if mic is
+                        unavailable.</div>
+                </div>
                 <div class="form-row">
                     <div class="form-group">
                         <label>Clip Length</label>
                         <select name="motion_clip_mode" id="motion_clip_mode">
-                            <option value="auto" {% if motion_clip_mode == 'auto' %}selected{% endif %}>Automatic based on motion</option>
-                            <option value="fixed" {% if motion_clip_mode == 'fixed' %}selected{% endif %}>Fixed length</option>
+                            <option value="auto" {% if motion_clip_mode=='auto' %}selected{% endif %}>Automatic based on
+                                motion</option>
+                            <option value="fixed" {% if motion_clip_mode=='fixed' %}selected{% endif %}>Fixed length
+                            </option>
                         </select>
                         <div class="help-text">Automatic keeps recording while motion is still happening.</div>
                     </div>
@@ -384,6 +442,19 @@
                         <input type="number" name="motion_record_duration" value="{{ motion_record_duration }}" min="3"
                             max="300">
                         <div class="help-text">Used only when Clip Length is set to Fixed length.</div>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Live Stream FPS (Power vs Smoothness)</label>
+                        <input type="number" name="camera_stream_fps" value="{{ camera_stream_fps }}" min="5" max="30">
+                        <div class="help-text">Lower FPS saves battery. Recommended: 10-15 for power saving.</div>
+                    </div>
+                    <div class="form-group">
+                        <label>Live Stream Quality (50-100)</label>
+                        <input type="number" name="camera_stream_quality" value="{{ camera_stream_quality }}" min="50"
+                            max="100">
+                        <div class="help-text">Lower quality saves CPU, heat, and battery usage.</div>
                     </div>
                 </div>
             </div>
@@ -396,6 +467,8 @@
                     <input type="checkbox" id="sms_enabled" name="sms_enabled" {% if sms_enabled %}checked{% endif %}>
                     <label for="sms_enabled" style="margin: 0; font-weight: 400;">Send text alerts for motion</label>
                 </div>
+                <div class="info-box">Simple setup: enable texts, set your phone number, and Save. Advanced provider
+                    settings are optional.</div>
                 <div class="form-row">
                     <div class="form-group">
                         <label>Text Alert Number</label>
@@ -408,26 +481,33 @@
                         <div class="help-text">Prevents repeated motion texts from spamming the same number.</div>
                     </div>
                 </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label>Text Delivery Provider</label>
-                        <select name="sms_provider">
-                            <option value="twilio" {% if sms_provider == 'twilio' %}selected{% endif %}>Twilio</option>
-                            <option value="generic_http" {% if sms_provider == 'generic_http' %}selected{% endif %}>Custom HTTP endpoint</option>
-                            <option value="sns" {% if sms_provider == 'sns' %}selected{% endif %}>AWS SNS</option>
-                            <option value="plivo" {% if sms_provider == 'plivo' %}selected{% endif %}>Plivo</option>
-                        </select>
+                <button type="button" class="secondary-button" id="toggleSmsAdvancedBtn"
+                    onclick="toggleSmsAdvanced()">Show advanced text provider settings</button>
+                <div class="advanced-box" id="smsAdvanced" style="display:none;">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Text Delivery Provider</label>
+                            <select name="sms_provider">
+                                <option value="twilio" {% if sms_provider=='twilio' %}selected{% endif %}>Twilio
+                                </option>
+                                <option value="generic_http" {% if sms_provider=='generic_http' %}selected{% endif %}>
+                                    Custom HTTP endpoint</option>
+                                <option value="sns" {% if sms_provider=='sns' %}selected{% endif %}>AWS SNS</option>
+                                <option value="plivo" {% if sms_provider=='plivo' %}selected{% endif %}>Plivo</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Provider API URL</label>
+                            <input type="text" name="sms_api_url" value="{{ sms_api_url }}" placeholder="https://...">
+                            <div class="help-text">Only needed for Custom HTTP endpoint delivery.</div>
+                        </div>
                     </div>
                     <div class="form-group">
-                        <label>Provider API URL</label>
-                        <input type="text" name="sms_api_url" value="{{ sms_api_url }}" placeholder="https://...">
-                        <div class="help-text">Used for Custom HTTP endpoint delivery.</div>
+                        <label>Provider API Key</label>
+                        <input type="password" name="sms_api_key" value="{{ sms_api_key }}"
+                            placeholder="API key or token">
+                        <div class="help-text">Stored on the device and used for sending motion texts.</div>
                     </div>
-                </div>
-                <div class="form-group">
-                    <label>Provider API Key</label>
-                    <input type="password" name="sms_api_key" value="{{ sms_api_key }}" placeholder="API key or token">
-                    <div class="help-text">Stored on the device and used for sending motion texts.</div>
                 </div>
             </div>
 
@@ -526,13 +606,20 @@
                 <div class="form-row">
                     <div class="form-group">
                         <label>Current Username</label>
-                        <input type="text" id="keyUsername" placeholder="Your logged-in username">
+                        <input type="text" id="keyUsername" value="{{ current_user }}" readonly>
+                        <div class="help-text">This is your current signed-in account.</div>
                     </div>
                     <div class="form-group">
                         <label>Current Password</label>
-                        <input type="password" id="keyPassword" placeholder="Current password">
+                        <div class="password-row">
+                            <input type="password" id="keyPassword" placeholder="Current password">
+                            <button type="button" class="secondary-button" onclick="toggleKeyPassword()"
+                                style="margin-top:0;">Show</button>
+                        </div>
+                        <div class="help-text">Enter your login password, then click View Key.</div>
                     </div>
                 </div>
+                <button type="button" class="secondary-button" onclick="copySecurityKey()">Copy Security Key</button>
             </div>
 
             <!-- WiFi Settings (already added above, this is just positioning) -->
@@ -564,8 +651,11 @@
                 motion_sensitivity_mode: document.querySelector('select[name="motion_sensitivity_mode"]').value,
                 motion_trigger_mode: document.querySelector('select[name="motion_trigger_mode"]').value,
                 motion_record_enabled: document.getElementById('motion_record').checked,
+                audio_record_on_motion: document.getElementById('audio_record_on_motion').checked,
                 motion_clip_mode: document.getElementById('motion_clip_mode').value,
                 motion_record_duration: parseInt(document.querySelector('input[name="motion_record_duration"]').value),
+                camera_stream_fps: parseInt(document.querySelector('input[name="camera_stream_fps"]').value),
+                camera_stream_quality: parseInt(document.querySelector('input[name="camera_stream_quality"]').value),
                 storage_cleanup_days: parseInt(document.querySelector('input[name="storage_cleanup_days"]').value),
                 storage_encrypted_dir: document.querySelector('input[name="storage_encrypted_dir"]').value,
                 sms_enabled: document.getElementById('sms_enabled').checked,
@@ -609,6 +699,33 @@
             notif.textContent = message;
             notif.className = `notification ${type}`;
             setTimeout(() => notif.className = 'notification', 4000);
+        }
+
+        function toggleSmsAdvanced() {
+            const box = document.getElementById('smsAdvanced');
+            const btn = document.getElementById('toggleSmsAdvancedBtn');
+            const isOpen = box.style.display !== 'none';
+            box.style.display = isOpen ? 'none' : 'block';
+            btn.textContent = isOpen ? 'Show advanced text provider settings' : 'Hide advanced text provider settings';
+        }
+
+        function toggleKeyPassword() {
+            const input = document.getElementById('keyPassword');
+            input.type = input.type === 'password' ? 'text' : 'password';
+        }
+
+        async function copySecurityKey() {
+            const value = (document.getElementById('enrollmentKeyDisplay').value || '').trim();
+            if (!value || value.includes('••••')) {
+                showNotification('❌ Click View Key first to load the key', 'error');
+                return;
+            }
+            try {
+                await navigator.clipboard.writeText(value);
+                showNotification('✅ Security key copied to clipboard', 'success');
+            } catch (err) {
+                showNotification('❌ Could not copy key: ' + err.message, 'error');
+            }
         }
 
         async function cleanupOldRecordings() {
@@ -670,8 +787,8 @@
             const username = document.getElementById('keyUsername').value.trim();
             const password = document.getElementById('keyPassword').value;
 
-            if (!username || !password) {
-                showNotification('❌ Enter current username and password first', 'error');
+            if (!password) {
+                showNotification('❌ Enter your current password first', 'error');
                 return;
             }
 
@@ -694,6 +811,17 @@
                 showNotification('❌ Error: ' + err.message, 'error');
             }
         }
+
+        // Keep advanced SMS settings hidden by default, unless values already exist.
+        (() => {
+            const provider = document.querySelector('select[name="sms_provider"]').value;
+            const apiUrl = (document.querySelector('input[name="sms_api_url"]').value || '').trim();
+            const apiKey = (document.querySelector('input[name="sms_api_key"]').value || '').trim();
+            const hasAdvancedValues = provider !== 'twilio' || apiUrl.length > 0 || apiKey.length > 0;
+            if (hasAdvancedValues) {
+                toggleSmsAdvanced();
+            }
+        })();
     </script>
 </body>
 

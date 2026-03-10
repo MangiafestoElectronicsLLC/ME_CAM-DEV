@@ -21,9 +21,12 @@ import threading
 import json
 import shutil
 import asyncio
+import tempfile
+import base64
 from functools import wraps
 import secrets
 import ipaddress
+from urllib.parse import urlparse
 
 # Add src directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'src'))
@@ -43,30 +46,41 @@ except Exception as e:
     CLOUD_AVAILABLE = False
     logger.warning(f"[CLOUD] Encrypted cloud storage not available: {e}")
 
-# v3.0 modules
-try:
-    from src.streaming.webrtc_peer import WebRTCStreamer
-    WEBRTC_AVAILABLE = True
-    logger.info("[V3] WebRTC module loaded successfully")
-except ImportError as e:
-    WEBRTC_AVAILABLE = False
-    logger.warning(f"[V3] WebRTC not available: {e}")
+# V3 modules are disabled by default on Pi Zero because some optional native
+# dependencies can crash the interpreter during import on constrained devices.
+WEBRTC_AVAILABLE = False
+AI_DETECTION_AVAILABLE = False
+REMOTE_ACCESS_AVAILABLE = False
+WebRTCStreamer = None
+SmartMotionDetector = None
+DetectionTracker = None
+TailscaleHelper = None
+CloudflareHelper = None
 
-try:
-    from src.detection.tflite_detector import SmartMotionDetector, DetectionTracker
-    AI_DETECTION_AVAILABLE = True
-    logger.info("[V3] AI detection module loaded successfully")
-except ImportError as e:
-    AI_DETECTION_AVAILABLE = False
-    logger.warning(f"[V3] AI detection not available: {e}")
+if os.environ.get("MECAM_ENABLE_V3_MODULES", "0") == "1":
+    try:
+        from src.streaming.webrtc_peer import WebRTCStreamer
+        WEBRTC_AVAILABLE = True
+        logger.info("[V3] WebRTC module loaded successfully")
+    except Exception as e:
+        WEBRTC_AVAILABLE = False
+        logger.warning(f"[V3] WebRTC not available: {e}")
 
-try:
-    from src.networking.remote_access import TailscaleHelper, CloudflareHelper
-    REMOTE_ACCESS_AVAILABLE = True
-    logger.info("[V3] Remote access helpers loaded successfully")
-except ImportError as e:
-    REMOTE_ACCESS_AVAILABLE = False
-    logger.warning(f"[V3] Remote access not available: {e}")
+    try:
+        from src.detection.tflite_detector import SmartMotionDetector, DetectionTracker
+        AI_DETECTION_AVAILABLE = True
+        logger.info("[V3] AI detection module loaded successfully")
+    except Exception as e:
+        AI_DETECTION_AVAILABLE = False
+        logger.warning(f"[V3] AI detection not available: {e}")
+
+    try:
+        from src.networking.remote_access import TailscaleHelper, CloudflareHelper
+        REMOTE_ACCESS_AVAILABLE = True
+        logger.info("[V3] Remote access helpers loaded successfully")
+    except Exception as e:
+        REMOTE_ACCESS_AVAILABLE = False
+        logger.warning(f"[V3] Remote access not available: {e}")
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -275,8 +289,8 @@ def _motion_profile_map() -> dict:
             "clip_max": 14,
         },
         "balanced": {
-            "threshold": 0.02,
-            "min_area": 500,
+            "threshold": 0.012,
+            "min_area": 220,
             "ai_sensitivity": 0.6,
             "max_diff": 70,
             "motion_percent": 1.0,
@@ -652,6 +666,7 @@ def create_lite_app(pi_model, camera_config):
     """Create lightweight Flask app with all features"""
     
     app = Flask(__name__, template_folder='templates', static_folder='static')
+    webrtc_streamer = None
     cfg = get_config()
     security = _ensure_security_cfg(cfg)
     app.secret_key = security.get("secret_key")
@@ -808,6 +823,29 @@ def create_lite_app(pi_model, camera_config):
     
     if camera_config['mode'] in ['lite', 'fast']:
         try:
+            stream_cfg = cfg.get('camera', {}) or {}
+            try:
+                stream_fps = int(stream_cfg.get('stream_fps', 20) or 20)
+            except Exception:
+                stream_fps = 20
+            stream_fps = max(5, min(30, stream_fps))
+
+            raw_quality = stream_cfg.get('stream_quality', 85)
+            if isinstance(raw_quality, str):
+                quality_map = {
+                    'low': 70,
+                    'standard': 80,
+                    'high': 90,
+                    'ultra': 95,
+                }
+                try:
+                    stream_quality = int(raw_quality)
+                except Exception:
+                    stream_quality = quality_map.get(raw_quality.lower(), 85)
+            else:
+                stream_quality = int(raw_quality)
+            stream_quality = max(50, min(100, stream_quality))
+
             from src.camera import RpicamStreamer, is_rpicam_available
             rotation_degrees = {
                 'rotate_90': 90,
@@ -822,15 +860,18 @@ def create_lite_app(pi_model, camera_config):
                 camera = RpicamStreamer(
                     width=640,
                     height=480,
-                    fps=30,
-                    quality=95,
+                    fps=stream_fps,
+                    quality=stream_quality,
                     rotation=rotation_degrees,
                     hflip=hflip,
                     vflip=vflip,
                 )
                 if camera.start():
                     camera_available = True
-                    logger.success(f"[CAMERA] RPiCam initialized (OPTIMIZED): 640x480 @ 30 FPS, Quality 95, rotation={camera_rotation_mode}")
+                    logger.success(
+                        f"[CAMERA] RPiCam initialized: 640x480 @ {stream_fps} FPS, "
+                        f"Quality {stream_quality}, rotation={camera_rotation_mode}"
+                    )
             else:
                 logger.warning("[CAMERA] rpicam-jpeg not available, falling back to picamera2...")
                 from picamera2 import Picamera2
@@ -1057,9 +1098,11 @@ def create_lite_app(pi_model, camera_config):
 
             audio_proc = None
             audio_path = None
+            audio_embedded = False
+            audio_sidecar = None
 
-            # Try to capture audio in parallel if arecord is present
-            if shutil.which("arecord"):
+            # Try to capture audio in parallel when enabled and arecord is present.
+            if cfg.get('audio_record_on_motion', True) and shutil.which("arecord"):
                 try:
                     audio_path = os.path.join(recordings_path, f"motion_{timestamp}.wav")
                     audio_cmd = _build_arecord_command(audio_path, max_duration)
@@ -1107,33 +1150,44 @@ def create_lite_app(pi_model, camera_config):
                     audio_proc.kill()
                 audio_proc = None
 
+            has_audio_capture = bool(audio_path and os.path.exists(audio_path) and os.path.getsize(audio_path) > 1024)
+
             # Mux audio if available and ffmpeg present
-            if audio_path and os.path.exists(audio_path) and shutil.which("ffmpeg"):
+            if has_audio_capture and shutil.which("ffmpeg"):
                 try:
                     muxed_path = filepath.replace(".mp4", "_av.mp4")
                     mux_cmd = [
                         "ffmpeg", "-y",
+                        "-loglevel", "error",
                         "-i", filepath,
                         "-i", audio_path,
                         "-c:v", "copy",
                         "-c:a", "aac",
                         "-shortest",
+                        "-movflags", "+faststart",
                         muxed_path
                     ]
-                    subprocess.run(mux_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False, timeout=20)
+                    # Pi Zero can take noticeably longer when remuxing AV clips.
+                    mux_timeout = max(30, int(max_duration) * 4)
+                    subprocess.run(mux_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False, timeout=mux_timeout)
                     if os.path.exists(muxed_path):
                         os.replace(muxed_path, filepath)
+                        audio_embedded = True
                         logger.info(f"[AUDIO] Embedded audio into {filename}")
                     else:
                         logger.warning("[AUDIO] Mux failed; keeping video-only file")
                 except Exception as e:
                     logger.warning(f"[AUDIO] Mux error: {e}")
                 finally:
-                    try:
-                        if audio_path and os.path.exists(audio_path):
-                            os.remove(audio_path)
-                    except Exception:
-                        pass
+                    if audio_embedded:
+                        try:
+                            if audio_path and os.path.exists(audio_path):
+                                os.remove(audio_path)
+                        except Exception:
+                            pass
+            elif has_audio_capture:
+                audio_sidecar = os.path.basename(audio_path)
+                logger.warning("[AUDIO] ffmpeg unavailable or mux skipped; keeping sidecar WAV file")
 
             final_path, encrypted = _encrypt_clip_if_enabled(filepath, cfg)
             final_name = os.path.basename(final_path)
@@ -1143,7 +1197,12 @@ def create_lite_app(pi_model, camera_config):
                 logger.info(f"[MOTION] Saved {total_frames} frames to encrypted clip: {final_name}")
             else:
                 logger.info(f"[MOTION] Saved {total_frames} frames ({len(buffered_frames)} buffered) to: {filename}")
-            return final_name
+            return {
+                "clip_name": final_name,
+                "audio_embedded": audio_embedded,
+                "audio_sidecar": audio_sidecar,
+                "audio_attempted": bool(cfg.get('audio_record_on_motion', True)),
+            }
         except Exception as e:
             logger.error(f"[MOTION] Save buffered clip failed: {e}")
             return None
@@ -1231,11 +1290,13 @@ def create_lite_app(pi_model, camera_config):
             device_id=cfg.get('device_id', 'camera-001'),
             pi_model=pi_model['name'],
             ram_mb=pi_model['ram_mb'],
-            camera_available=camera is not None,
+            camera_available=bool(camera is not None and camera_available),
             battery_pct=battery_status.get('percent', 0),
             storage=storage,
             storage_percent=storage_percent,
             motion_count=len(motion_events),
+            tts_available=bool(shutil.which('espeak') or shutil.which('espeak-ng') or shutil.which('spd-say')),
+            audio_playback_available=bool(shutil.which('aplay') or shutil.which('paplay') or shutil.which('ffplay')),
             version='2.2.3-LITE'
         )
     
@@ -1497,10 +1558,13 @@ def create_lite_app(pi_model, camera_config):
             send_motion_to_emergency=cfg.get('send_motion_to_emergency', False),
             motion_threshold=cfg.get('motion_threshold', 0.02),
             motion_record_enabled=cfg.get('motion_record_enabled', True),
+            audio_record_on_motion=cfg.get('audio_record_on_motion', True),
             motion_record_duration=cfg.get('motion_record_duration', 10),
             motion_sensitivity_mode=motion_settings['sensitivity_mode'],
             motion_trigger_mode=motion_settings['trigger_mode'],
             motion_clip_mode=motion_settings['clip_mode'],
+            camera_stream_fps=int((cfg.get('camera', {}) or {}).get('stream_fps', 20) or 20),
+            camera_stream_quality=(cfg.get('camera', {}) or {}).get('stream_quality', 85),
             storage_cleanup_days=cfg.get('storage_cleanup_days', 7),
             sms_enabled=sms_cfg.get('enabled', False),
             sms_phone_to=sms_cfg.get('phone_to', ''),
@@ -1509,6 +1573,7 @@ def create_lite_app(pi_model, camera_config):
             sms_rate_limit=sms_cfg.get('rate_limit_minutes', 5),
             sms_provider=sms_cfg.get('provider', 'twilio'),
             storage=storage,
+            current_user=session.get('user', ''),
             config=cfg
         )
     
@@ -1680,14 +1745,11 @@ def create_lite_app(pi_model, camera_config):
 
         try:
             data = request.get_json() or {}
-            username = (data.get('username') or '').strip()
+            username = (session.get('user') or data.get('username') or '').strip()
             password = data.get('password') or ''
 
-            if not username or not password:
-                return jsonify({'error': 'Username and password are required'}), 400
-
-            if username != session.get('user'):
-                return jsonify({'error': 'Username must match current session'}), 403
+            if not password:
+                return jsonify({'error': 'Password is required'}), 400
 
             if not authenticate(username, password):
                 return jsonify({'error': 'Invalid credentials'}), 403
@@ -1774,6 +1836,100 @@ def create_lite_app(pi_model, camera_config):
         except Exception as e:
             logger.warning(f"[NETWORK] WiFi status error: {e}")
             return jsonify({'connected': False, 'error': str(e), 'ssid': 'Unknown', 'signal': 'N/A'}), 200
+
+    @app.route("/api/audio/speak", methods=["POST"])
+    def api_audio_speak():
+        """Speak dashboard text through the device speaker (USB/HDMI/audio jack)."""
+        if 'user' not in session:
+            return jsonify({'error': 'Not authenticated'}), 401
+
+        try:
+            data = request.get_json() or {}
+            text = (data.get('text') or '').strip()
+            if not text:
+                return jsonify({'ok': False, 'error': 'Message text is required'}), 400
+            if len(text) > 160:
+                text = text[:160]
+
+            if shutil.which('espeak'):
+                subprocess.run(['espeak', '-s', '155', '-a', '120', text], timeout=12, check=False)
+                return jsonify({'ok': True, 'message': 'Played on device speaker'})
+
+            if shutil.which('espeak-ng'):
+                subprocess.run(['espeak-ng', '-s', '155', '-a', '120', text], timeout=12, check=False)
+                return jsonify({'ok': True, 'message': 'Played on device speaker'})
+
+            if shutil.which('spd-say'):
+                subprocess.run(['spd-say', text], timeout=12, check=False)
+                return jsonify({'ok': True, 'message': 'Played on device speaker'})
+
+            return jsonify({'ok': False, 'error': 'No text-to-speech engine found (install espeak)'}), 503
+        except Exception as e:
+            logger.error(f"[AUDIO] Speak failed: {e}")
+            return jsonify({'ok': False, 'error': str(e)}), 500
+
+    def _play_audio_file(path: str) -> str:
+        """Play an uploaded WAV/PCM file on the device using available tools."""
+        players = [
+            ['aplay', '-q', path],
+            ['paplay', path],
+            ['ffplay', '-nodisp', '-autoexit', '-loglevel', 'quiet', path],
+        ]
+        for cmd in players:
+            if not shutil.which(cmd[0]):
+                continue
+            try:
+                result = subprocess.run(cmd, timeout=18, capture_output=True, check=False)
+                if result.returncode == 0:
+                    return cmd[0]
+                logger.warning(f"[AUDIO] {cmd[0]} returned {result.returncode}: {(result.stderr or b'')[:120]}")
+            except Exception as e:
+                logger.warning(f"[AUDIO] {cmd[0]} playback failed: {e}")
+        return ''
+
+    @app.route("/api/audio/play-upload", methods=["POST"])
+    def api_audio_play_upload():
+        """Play uploaded browser microphone audio on the device speaker."""
+        if 'user' not in session:
+            return jsonify({'error': 'Not authenticated'}), 401
+
+        tmp_path = None
+        try:
+            data = request.get_json() or {}
+            audio_b64 = (data.get('audio_wav_base64') or '').strip()
+            if not audio_b64:
+                return jsonify({'ok': False, 'error': 'Audio payload is required'}), 400
+
+            if ',' in audio_b64:
+                audio_b64 = audio_b64.split(',', 1)[1]
+
+            # Keep payload bounded for Pi Zero memory safety (~4MB raw base64).
+            if len(audio_b64) > 4_200_000:
+                return jsonify({'ok': False, 'error': 'Audio message is too large. Keep it under ~20 seconds.'}), 413
+
+            audio_bytes = base64.b64decode(audio_b64, validate=True)
+            if len(audio_bytes) < 128:
+                return jsonify({'ok': False, 'error': 'Invalid audio payload'}), 400
+
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tmp:
+                tmp.write(audio_bytes)
+                tmp.flush()
+                tmp_path = tmp.name
+
+            player = _play_audio_file(tmp_path)
+            if not player:
+                return jsonify({'ok': False, 'error': 'No audio playback tool found (install alsa-utils)'}), 503
+
+            return jsonify({'ok': True, 'message': f'Voice message played on device ({player})'})
+        except Exception as e:
+            logger.error(f"[AUDIO] Upload playback failed: {e}")
+            return jsonify({'ok': False, 'error': str(e)}), 500
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except Exception:
+                    pass
     
     @app.route("/api/network/wifi/update", methods=["POST"])
     def api_wifi_update():
@@ -2246,7 +2402,19 @@ def create_lite_app(pi_model, camera_config):
             cfg['emergency_phone'] = data.get('emergency_phone', cfg.get('emergency_phone'))
             cfg['send_motion_to_emergency'] = data.get('send_motion_to_emergency', False)
             cfg['motion_record_enabled'] = data.get('motion_record_enabled', True)
+            cfg['audio_record_on_motion'] = data.get('audio_record_on_motion', cfg.get('audio_record_on_motion', True))
             cfg['motion_record_duration'] = int(data.get('motion_record_duration', cfg.get('motion_record_duration', 10) or 10))
+            cfg.setdefault('camera', {})
+            cfg['camera']['stream_fps'] = max(5, min(30, int(data.get('camera_stream_fps', cfg.get('camera', {}).get('stream_fps', 20)) or 20)))
+
+            incoming_quality = data.get('camera_stream_quality', cfg.get('camera', {}).get('stream_quality', 85))
+            if isinstance(incoming_quality, str):
+                try:
+                    incoming_quality = int(incoming_quality)
+                except Exception:
+                    incoming_quality = 85
+            cfg['camera']['stream_quality'] = max(50, min(100, int(incoming_quality)))
+
             cfg['storage_cleanup_days'] = int(data.get('storage_cleanup_days', 7))
             cfg['nanny_cam_enabled'] = data.get('nanny_cam_enabled', False)
             cfg['storage_encrypt'] = True
@@ -2270,12 +2438,32 @@ def create_lite_app(pi_model, camera_config):
             cfg['sms_api_url'] = data.get('sms_api_url', '')
             cfg['sms_api_key'] = data.get('sms_api_key', '')
             cfg['sms_rate_limit'] = int(data.get('sms_rate_limit', 5))
+
+            # Keep existing provider credentials if user only updates number/rate.
+            if not cfg['sms_api_url']:
+                cfg['sms_api_url'] = cfg.get('notifications', {}).get('sms', {}).get('generic_http', {}).get('url', '')
+            if not cfg['sms_api_key']:
+                cfg['sms_api_key'] = cfg.get('notifications', {}).get('sms', {}).get('generic_http', {}).get('auth_token', '')
+
             sms_cfg = _get_sms_cfg(cfg)
             requested_provider = data.get('sms_provider')
             if requested_provider:
                 sms_cfg['provider'] = requested_provider
-            sms_cfg['enabled'] = bool(cfg['sms_enabled'] and cfg['sms_phone_to'])
-            sms_cfg['phone_to'] = cfg['sms_phone_to']
+
+            if sms_cfg.get('enabled') and sms_cfg.get('provider') == 'generic_http':
+                parsed = urlparse((cfg.get('sms_api_url') or '').strip())
+                host = (parsed.hostname or '').strip().lower()
+                local_hosts = {'localhost', '127.0.0.1', '0.0.0.0'}
+                device_ip = (request.host or '').split(':')[0].strip().lower()
+                if not parsed.scheme or not host or host in local_hosts or (device_ip and host == device_ip):
+                    return jsonify({
+                        'ok': False,
+                        'error': 'Text Delivery URL must be an external SMS gateway, not this camera URL.'
+                    }), 400
+
+            sms_destination = (cfg['sms_phone_to'] or (cfg.get('emergency_phone', '') if cfg.get('send_motion_to_emergency') else '')).strip()
+            sms_cfg['enabled'] = bool(cfg['sms_enabled'] and sms_destination)
+            sms_cfg['phone_to'] = sms_destination
             sms_cfg['rate_limit_minutes'] = cfg['sms_rate_limit']
             sms_cfg['motion_threshold'] = 0.0
             sms_cfg.setdefault('generic_http', {})
@@ -2404,54 +2592,34 @@ def create_lite_app(pi_model, camera_config):
             message += f"Type: {event.get('type', 'motion').upper()}\n"
             message += f"Confidence: {int(event.get('confidence', 0) * 100)}%"
             
-            if cfg.get('sms_enabled') and cfg.get('sms_api_url'):
-                import requests
-                try:
-                    # Generic HTTP-based SMS API integration
-                    api_url = cfg.get('sms_api_url')
-                    api_key = cfg.get('sms_api_key', '')
-                    
-                    headers = {}
-                    if api_key:
-                        headers['Authorization'] = f"Bearer {api_key}"
-                        headers['X-API-Key'] = api_key
-                    
-                    payload = {
-                        'to': phone or cfg.get('sms_phone_to'),
-                        'message': message,
-                        'from': device_name
-                    }
-                    
-                    response = requests.post(api_url, json=payload, headers=headers, timeout=10)
-                    
-                    if response.status_code in [200, 201]:
-                        logger.info(f"[SMS] Message sent to {phone}")
-                        return jsonify({
-                            'ok': True,
-                            'message': 'SMS sent successfully',
-                            'phone': phone
-                        })
-                    else:
-                        logger.warning(f"[SMS] Send failed: {response.status_code} - {response.text}")
-                        return jsonify({
-                            'ok': False,
-                            'error': f'API returned {response.status_code}'
-                        }), 500
-                except requests.exceptions.Timeout:
-                    logger.error("[SMS] Request timeout")
-                    return jsonify({'ok': False, 'error': 'SMS API timeout'}), 504
-                except Exception as e:
-                    logger.error(f"[SMS] Send failed: {e}")
-                    return jsonify({'ok': False, 'error': str(e)}), 500
-            else:
-                # Log the attempt if SMS not configured
-                logger.info(f"[SMS] SMS not configured. Message would go to: {phone}")
-                return jsonify({
-                    'ok': True,
-                    'message': 'SMS logging enabled (no API configured)',
-                    'phone': phone,
-                    'text': message
-                })
+            sms_cfg = _get_sms_cfg(cfg)
+            recipient = (
+                phone
+                or sms_cfg.get('phone_to')
+                or cfg.get('sms_phone_to', '')
+                or (cfg.get('emergency_phone', '') if cfg.get('send_motion_to_emergency') else '')
+            ).strip()
+
+            if not sms_cfg.get('enabled'):
+                logger.info("[SMS] SMS notifications are disabled")
+                return jsonify({'ok': False, 'error': 'SMS notifications are disabled'}), 400
+
+            if not recipient:
+                return jsonify({'ok': False, 'error': 'No destination phone configured'}), 400
+
+            from src.core import get_sms_notifier
+            notifier = get_sms_notifier()
+            accepted = notifier.send_sms(recipient, message)
+
+            if not accepted:
+                return jsonify({'ok': False, 'error': 'SMS send rejected (disabled or rate-limited)'}), 429
+
+            logger.info(f"[SMS] Message accepted for delivery to {recipient}")
+            return jsonify({
+                'ok': True,
+                'message': 'SMS accepted for delivery',
+                'phone': recipient
+            })
         except Exception as e:
             logger.error(f"[MOTION] Send failed: {e}")
             return jsonify({'ok': False, 'error': str(e)}), 500
@@ -2596,6 +2764,13 @@ def create_lite_app(pi_model, camera_config):
                                 })
                                 if upload_id:
                                     event['details']['cloud_upload_id'] = upload_id
+                                elif not is_wifi_connected():
+                                    # Preserve detections while offline and sync/upload later.
+                                    queue_offline_clip(final_name, {
+                                        "event_id": event_id,
+                                        "type": event.get("type"),
+                                        "timestamp": event.get("timestamp")
+                                    })
                                 updated = True
                                 logger.info(f"[MOTION] Updated event {event_id} with video: {final_name}")
                                 break
@@ -2671,7 +2846,7 @@ def create_lite_app(pi_model, camera_config):
                                     trigger_mode = motion_settings['trigger_mode']
                                     contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
                                     significant_contours = sum(1 for c in contours if cv2.contourArea(c) >= min_area)
-                                    trigger_now = motion_ratio > motion_threshold and (significant_contours > 0 or trigger_mode == 'all_motion')
+                                    trigger_now = motion_ratio > motion_threshold and significant_contours > 0
                                     motion_streak = (motion_streak + 1) if trigger_now else max(0, motion_streak - 1)
                                     
                                     cfg = get_config()
@@ -2680,7 +2855,7 @@ def create_lite_app(pi_model, camera_config):
 
                                     # Motion detected and not in cooldown
                                     cooldown_active = time.time() < motion_cooldown_until
-                                    if motion_streak >= 2 and not cooldown_active and not recording:
+                                    if motion_streak >= 1 and not cooldown_active and not recording:
                                         if nanny_cam or not motion_enabled:
                                             motion_streak = 0
                                         else:
@@ -2714,6 +2889,23 @@ def create_lite_app(pi_model, camera_config):
                                             motion_streak = 0
 
                                             logger.info(f"[MOTION] Recording started with {len(pre_frames)} pre-motion frames")
+
+                                            # Keep SMS behavior consistent with picamera motion path.
+                                            if cfg.get('sms_enabled') and cfg.get('send_motion_to_emergency'):
+                                                phone = cfg.get('sms_phone_to') or cfg.get('emergency_phone')
+                                                if phone:
+                                                    try:
+                                                        from src.core import get_sms_notifier
+                                                        sms_notifier = get_sms_notifier()
+                                                        device_name = cfg.get('device_name', 'ME Camera')
+                                                        location = cfg.get('device_location', 'Unknown')
+                                                        timestamp_txt = datetime.now().strftime("%I:%M:%S %p")
+                                                        msg = f"🚨 {device_name}: Motion detected at {location} - {timestamp_txt}"
+                                                        sms_notifier.send_sms(phone, msg)
+                                                        logger.success(f"[SMS] Motion alert sent to {phone}")
+                                                    except Exception as sms_error:
+                                                        logger.error(f"[SMS] Notification failed: {sms_error}")
+                                                        queue_notification_retry(phone, msg, reason="send_failed")
                                 
                                 last_frame = gray
                     except Exception as e:
@@ -2847,9 +3039,9 @@ def create_lite_app(pi_model, camera_config):
                                         mean_diff=mean_diff,
                                         motion_percent=motion_percent,
                                     )
-                                    clip_file = save_motion_clip_buffered(camera, frame_buffer.copy(), duration_sec=clip_duration)
-                                    video_path = clip_file
-                                    if not clip_file:
+                                    clip_result = save_motion_clip_buffered(camera, frame_buffer.copy(), duration_sec=clip_duration)
+                                    video_path = clip_result.get("clip_name") if isinstance(clip_result, dict) else clip_result
+                                    if not video_path:
                                         # Fallback to snapshot if clip fails
                                         video_path = save_motion_snapshot(frame)
 
@@ -2861,6 +3053,8 @@ def create_lite_app(pi_model, camera_config):
                                             "mode": "lite",
                                             "video_path": video_path,
                                             "encrypted": bool(video_path and str(video_path).endswith('.enc')),
+                                            "audio_embedded": bool(isinstance(clip_result, dict) and clip_result.get("audio_embedded")),
+                                            "audio_sidecar": (clip_result.get("audio_sidecar") if isinstance(clip_result, dict) else None),
                                             "mean_diff": float(mean_diff),
                                             "max_diff": float(max_diff),
                                             "label": detected_label,

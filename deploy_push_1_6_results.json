@@ -21,16 +21,22 @@
         "copied":  [
                        "web/app_lite.py",
                        "web/templates/config.html",
+                       "web/templates/dashboard_lite.html",
+                       "src/camera/rpicam_streamer.py",
                        "config/config_default.json",
-                       "src/core/sms_notifier.py"
+                       "src/core/sms_notifier.py",
+                       "src/core/battery_monitor.py",
+                       "src/core/__init__.py",
+                       "src/core/user_auth.py",
+                       "scripts/generate_config.py"
                    ],
         "copy_failed":  [
 
                         ],
-        "service_mecamera":  "active",
-        "service_mecamlite":  "active",
+        "service_mecamera":  "",
+        "service_mecamlite":  "",
         "api_preview":  "",
-        "error":  ""
+        "error":  "verify_failed: Exception calling \"EndExecute\" with \"1\" argument(s): \"Command \u0027sudo systemctl restart mecamera 2\u003e/dev/null; sudo systemctl restart mecam-lite 2\u003e/dev/null; sleep 2; echo mecamera:$(systemctl is-active mecamera 2\u003e/dev/null || true); echo mecamlite:$(systemctl is-active mecam-lite 2\u003e/dev/null || true); printf \u0027api=\u0027; (curl -s -m 3 http://localhost:8080/api/health || curl -s -m 3 http://localhost:8080/api/battery || true) | head -c 180; echo\u0027 has timed out.\""
     },
     {
         "device":  "3",
@@ -39,8 +45,14 @@
         "copied":  [
                        "web/app_lite.py",
                        "web/templates/config.html",
+                       "web/templates/dashboard_lite.html",
+                       "src/camera/rpicam_streamer.py",
                        "config/config_default.json",
-                       "src/core/sms_notifier.py"
+                       "src/core/sms_notifier.py",
+                       "src/core/battery_monitor.py",
+                       "src/core/__init__.py",
+                       "src/core/user_auth.py",
+                       "scripts/generate_config.py"
                    ],
         "copy_failed":  [
 
@@ -57,8 +69,14 @@
         "copied":  [
                        "web/app_lite.py",
                        "web/templates/config.html",
+                       "web/templates/dashboard_lite.html",
+                       "src/camera/rpicam_streamer.py",
                        "config/config_default.json",
-                       "src/core/sms_notifier.py"
+                       "src/core/sms_notifier.py",
+                       "src/core/battery_monitor.py",
+                       "src/core/__init__.py",
+                       "src/core/user_auth.py",
+                       "scripts/generate_config.py"
                    ],
         "copy_failed":  [
 
@@ -75,8 +93,14 @@
         "copied":  [
                        "web/app_lite.py",
                        "web/templates/config.html",
+                       "web/templates/dashboard_lite.html",
+                       "src/camera/rpicam_streamer.py",
                        "config/config_default.json",
-                       "src/core/sms_notifier.py"
+                       "src/core/sms_notifier.py",
+                       "src/core/battery_monitor.py",
+                       "src/core/__init__.py",
+                       "src/core/user_auth.py",
+                       "scripts/generate_config.py"
                    ],
         "copy_failed":  [
 
@@ -93,13 +117,19 @@
         "copied":  [
                        "web/app_lite.py",
                        "web/templates/config.html",
+                       "web/templates/dashboard_lite.html",
+                       "src/camera/rpicam_streamer.py",
                        "config/config_default.json",
-                       "src/core/sms_notifier.py"
+                       "src/core/sms_notifier.py",
+                       "src/core/battery_monitor.py",
+                       "src/core/__init__.py",
+                       "src/core/user_auth.py",
+                       "scripts/generate_config.py"
                    ],
         "copy_failed":  [
 
                         ],
-        "service_mecamera":  "active",
+        "service_mecamera":  "activating",
         "service_mecamlite":  "inactive",
         "api_preview":  "",
         "error":  ""

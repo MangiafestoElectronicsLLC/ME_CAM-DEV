@@ -6,25 +6,13 @@ import sys
 from pathlib import Path
 
 
-PROFILES = {
-    "device3": {
+def _device_profile(device_number: int, *, framerate: int, stream_quality: int, camera_note: str) -> dict:
+    return {
         "first_run_completed": True,
-        "device_name": "ME_CAM_3",
-        "device_id": "pi-cam-003",
+        "device_name": f"ME_CAM_{device_number}",
+        "device_id": f"pi-cam-{device_number:03d}",
         "resolution": "640x480",
-        "framerate": 40,
-        "motion_detection": True,
-        "video_length": 30,
-        "storage_limit_gb": 50,
-        "auto_delete_old": True,
-        "web_port": 8080,
-    },
-    "device4": {
-        "first_run_completed": True,
-        "device_name": "ME_CAM_4",
-        "device_id": "pi-cam-004",
-        "resolution": "640x480",
-        "framerate": 30,
+        "framerate": framerate,
         "motion_detection": True,
         "video_length": 30,
         "storage_limit_gb": 50,
@@ -36,11 +24,21 @@ PROFILES = {
             "allow_setup_without_vpn": True,
         },
         "camera": {
-            "stream_fps": 30,
-            "stream_quality": 85,
+            "stream_fps": framerate,
+            "stream_quality": stream_quality,
             "encoding": "mjpeg",
         },
-    },
+        "notes": camera_note,
+    }
+
+
+PROFILES = {
+    "device1": _device_profile(1, framerate=40, stream_quality=85, camera_note="Pi Zero 2W baseline profile"),
+    "device2": _device_profile(2, framerate=40, stream_quality=85, camera_note="Pi Zero 2W baseline profile"),
+    "device3": _device_profile(3, framerate=40, stream_quality=85, camera_note="Pi Zero 2W + IMX519 profile"),
+    "device4": _device_profile(4, framerate=30, stream_quality=85, camera_note="Pi Zero 2W + OV547 profile"),
+    "device5": _device_profile(5, framerate=30, stream_quality=85, camera_note="Pi Zero 2W field profile (OV547-compatible)"),
+    "device6": _device_profile(6, framerate=30, stream_quality=85, camera_note="Pi Zero 2W field profile (camera-swap friendly)"),
     "device7": {
         "first_run_completed": True,
         "device_name": "ME_CAM_7",

@@ -98,6 +98,64 @@
         .logout-btn:hover {
             background: #e04557;
         }
+
+        .speak-inline {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+            min-width: 360px;
+        }
+
+        .speak-inline input[type="text"] {
+            width: 220px;
+            padding: 8px 10px;
+            border: 1px solid #d8d8d8;
+            border-radius: 8px;
+            font-size: 13px;
+        }
+
+        .speak-btn {
+            border: none;
+            border-radius: 8px;
+            padding: 8px 12px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            color: white;
+        }
+
+        .speak-btn.text {
+            background: #2e7dff;
+        }
+
+        .speak-btn.voice {
+            background: #0a8f5d;
+        }
+
+        .speak-btn.voice.stop {
+            background: #c62828;
+        }
+
+        #speakStatus {
+            width: 100%;
+            font-size: 12px;
+            color: #666;
+            margin-top: 2px;
+            min-height: 16px;
+        }
+
+        @media (max-width: 1020px) {
+            .speak-inline {
+                min-width: 100%;
+                justify-content: flex-start;
+            }
+
+            .speak-inline input[type="text"] {
+                width: 100%;
+            }
+        }
     </style>
 </head>
 
@@ -159,13 +217,26 @@
                     </label>
                     <span id="nannyCamStatus" style="font-size: 13px; color: #666;">Motion recording ON</span>
                 </div>
+                <div class="speak-inline">
+                    <input type="text" id="speakText" placeholder="Type message to play on this device">
+                    <button class="speak-btn text" onclick="speakOnDevice()">Speak Text</button>
+                    <button class="speak-btn voice" id="voiceStartBtn" onclick="startVoiceCapture()">Start
+                        Voice</button>
+                    <button class="speak-btn voice stop" id="voiceStopBtn" onclick="stopVoiceCapture()" disabled>Send
+                        Voice</button>
+                    <button class="speak-btn text" id="voiceUploadBtn" onclick="triggerVoiceUpload()">Upload
+                        Voice</button>
+                    <input type="file" id="voiceUploadInput" accept="audio/*" capture="microphone"
+                        style="display: none;" onchange="uploadVoiceFile(event)">
+                    <p id="speakStatus"></p>
+                </div>
             </div>
             <img src="/video_feed" class="camera-feed" alt="Camera Feed">
             <p style="margin-top: 10px; color: #666; font-size: 13px;">
                 {% if camera_available %}
                 ✅ Camera streaming active (lightweight mode, ~20 FPS)
                 {% else %}
-                ❌ Camera disabled due to insufficient RAM. Recording and motion detection still functional.
+                ❌ Camera stream unavailable. Check camera cable/driver and restart device.
                 {% endif %}
             </p>
         </div>
@@ -204,7 +275,7 @@
                     <span class="metric-label">Charge Level</span>
                     <span class="metric-value">{{ battery_pct }}%</span>
                     <div class="metric">
-                        <span class="metric-label">Runtime (10Ah)</span>
+                        <span class="metric-label">Estimated Runtime</span>
                         <span class="metric-value" id="battery-runtime">Loading...</span>
                     </div>
                 </div>
@@ -237,6 +308,7 @@
                     <p style="color: #999;">Loading motion data...</p>
                 </div>
             </div>
+
         </div>
     </div>
 
@@ -369,6 +441,268 @@
                     }
                 })
                 .catch(e => console.error('Toggle failed:', e));
+        }
+
+        function speakOnDevice() {
+            const text = (document.getElementById('speakText').value || '').trim();
+            const status = document.getElementById('speakStatus');
+            if (!text) {
+                status.textContent = 'Enter a message first.';
+                status.style.color = '#d32f2f';
+                return;
+            }
+
+            status.textContent = 'Sending...';
+            status.style.color = '#666';
+
+            fetch('/api/audio/speak', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text })
+            })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.ok) {
+                        status.textContent = data.message || 'Played on device';
+                        status.style.color = '#2e7d32';
+                    } else {
+                        status.textContent = data.error || 'Unable to play audio';
+                        status.style.color = '#d32f2f';
+                    }
+                })
+                .catch(err => {
+                    status.textContent = err.message;
+                    status.style.color = '#d32f2f';
+                });
+        }
+
+        let voiceCapture = {
+            stream: null,
+            context: null,
+            processor: null,
+            source: null,
+            chunks: [],
+            sampleRate: 44100,
+            running: false,
+        };
+
+        function mergeFloat32(chunks, totalLength) {
+            const out = new Float32Array(totalLength);
+            let offset = 0;
+            for (const chunk of chunks) {
+                out.set(chunk, offset);
+                offset += chunk.length;
+            }
+            return out;
+        }
+
+        function encodeWav(samples, sampleRate) {
+            const bytesPerSample = 2;
+            const blockAlign = bytesPerSample;
+            const buffer = new ArrayBuffer(44 + samples.length * bytesPerSample);
+            const view = new DataView(buffer);
+
+            function writeString(offset, str) {
+                for (let i = 0; i < str.length; i++) {
+                    view.setUint8(offset + i, str.charCodeAt(i));
+                }
+            }
+
+            let offset = 0;
+            writeString(offset, 'RIFF'); offset += 4;
+            view.setUint32(offset, 36 + samples.length * bytesPerSample, true); offset += 4;
+            writeString(offset, 'WAVE'); offset += 4;
+            writeString(offset, 'fmt '); offset += 4;
+            view.setUint32(offset, 16, true); offset += 4;
+            view.setUint16(offset, 1, true); offset += 2;
+            view.setUint16(offset, 1, true); offset += 2;
+            view.setUint32(offset, sampleRate, true); offset += 4;
+            view.setUint32(offset, sampleRate * blockAlign, true); offset += 4;
+            view.setUint16(offset, blockAlign, true); offset += 2;
+            view.setUint16(offset, 16, true); offset += 2;
+            writeString(offset, 'data'); offset += 4;
+            view.setUint32(offset, samples.length * bytesPerSample, true); offset += 4;
+
+            for (let i = 0; i < samples.length; i++, offset += 2) {
+                const s = Math.max(-1, Math.min(1, samples[i]));
+                view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+            }
+
+            return new Blob([view], { type: 'audio/wav' });
+        }
+
+        async function startVoiceCapture() {
+            const status = document.getElementById('speakStatus');
+            const startBtn = document.getElementById('voiceStartBtn');
+            const stopBtn = document.getElementById('voiceStopBtn');
+
+            if (voiceCapture.running) {
+                return;
+            }
+
+            const hasMicApi = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+            if (!hasMicApi) {
+                status.textContent = 'Live microphone capture is unavailable in this browser. Use Upload Voice.';
+                status.style.color = '#d32f2f';
+                return;
+            }
+
+            const isLocalHost = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+            if (!window.isSecureContext && !isLocalHost) {
+                status.textContent = 'Live microphone requires HTTPS in most browsers. Use Upload Voice on HTTP.';
+                status.style.color = '#d32f2f';
+                return;
+            }
+
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        channelCount: 1,
+                    }
+                });
+
+                const AudioContextCls = window.AudioContext || window.webkitAudioContext;
+                const audioContext = new AudioContextCls();
+                const source = audioContext.createMediaStreamSource(stream);
+                const processor = audioContext.createScriptProcessor(4096, 1, 1);
+
+                voiceCapture.stream = stream;
+                voiceCapture.context = audioContext;
+                voiceCapture.source = source;
+                voiceCapture.processor = processor;
+                voiceCapture.chunks = [];
+                voiceCapture.sampleRate = audioContext.sampleRate || 44100;
+                voiceCapture.running = true;
+
+                processor.onaudioprocess = (evt) => {
+                    if (!voiceCapture.running) {
+                        return;
+                    }
+                    const data = evt.inputBuffer.getChannelData(0);
+                    voiceCapture.chunks.push(new Float32Array(data));
+                };
+
+                source.connect(processor);
+                processor.connect(audioContext.destination);
+
+                startBtn.disabled = true;
+                stopBtn.disabled = false;
+                status.textContent = 'Recording... tap Send Voice when done.';
+                status.style.color = '#0a8f5d';
+            } catch (err) {
+                status.textContent = `Microphone unavailable: ${err.message}`;
+                status.style.color = '#d32f2f';
+            }
+        }
+
+        function triggerVoiceUpload() {
+            const input = document.getElementById('voiceUploadInput');
+            if (input) {
+                input.value = '';
+                input.click();
+            }
+        }
+
+        async function uploadVoiceFile(event) {
+            const status = document.getElementById('speakStatus');
+            const file = event.target.files && event.target.files[0];
+            if (!file) {
+                return;
+            }
+
+            try {
+                const dataUrl = await new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = () => resolve(reader.result);
+                    reader.onerror = reject;
+                    reader.readAsDataURL(file);
+                });
+
+                status.textContent = 'Uploading voice message...';
+                status.style.color = '#666';
+
+                const response = await fetch('/api/audio/play-upload', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ audio_wav_base64: dataUrl })
+                });
+                const result = await response.json();
+
+                if (result.ok) {
+                    status.textContent = result.message || 'Voice message played on device';
+                    status.style.color = '#2e7d32';
+                } else {
+                    status.textContent = result.error || 'Unable to play voice message';
+                    status.style.color = '#d32f2f';
+                }
+            } catch (err) {
+                status.textContent = err.message || 'Voice upload failed';
+                status.style.color = '#d32f2f';
+            }
+        }
+
+        async function stopVoiceCapture() {
+            const status = document.getElementById('speakStatus');
+            const startBtn = document.getElementById('voiceStartBtn');
+            const stopBtn = document.getElementById('voiceStopBtn');
+
+            if (!voiceCapture.running) {
+                return;
+            }
+
+            voiceCapture.running = false;
+
+            try {
+                voiceCapture.processor.disconnect();
+                voiceCapture.source.disconnect();
+                voiceCapture.stream.getTracks().forEach(t => t.stop());
+                await voiceCapture.context.close();
+
+                const totalLength = voiceCapture.chunks.reduce((acc, cur) => acc + cur.length, 0);
+                if (!totalLength) {
+                    throw new Error('No audio captured');
+                }
+
+                const merged = mergeFloat32(voiceCapture.chunks, totalLength);
+                const wavBlob = encodeWav(merged, voiceCapture.sampleRate);
+                const dataUrl = await new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = () => resolve(reader.result);
+                    reader.onerror = reject;
+                    reader.readAsDataURL(wavBlob);
+                });
+
+                status.textContent = 'Sending voice message to device...';
+                status.style.color = '#666';
+
+                const response = await fetch('/api/audio/play-upload', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ audio_wav_base64: dataUrl })
+                });
+                const result = await response.json();
+
+                if (result.ok) {
+                    status.textContent = result.message || 'Voice message played on device';
+                    status.style.color = '#2e7d32';
+                } else {
+                    status.textContent = result.error || 'Unable to play voice message';
+                    status.style.color = '#d32f2f';
+                }
+            } catch (err) {
+                status.textContent = err.message || 'Voice capture failed';
+                status.style.color = '#d32f2f';
+            } finally {
+                voiceCapture.stream = null;
+                voiceCapture.context = null;
+                voiceCapture.processor = null;
+                voiceCapture.source = null;
+                voiceCapture.chunks = [];
+                startBtn.disabled = false;
+                stopBtn.disabled = true;
+            }
         }
 
         // Check nanny cam status on load
