@@ -9,6 +9,7 @@ param(
         5 = "mecamdev5.local"
         6 = "mecamdev6.local"
         7 = "mecamdev7.local"
+        8 = "mecamdev8.local"
     }
 )
 
@@ -27,8 +28,9 @@ function Get-DevicePassword([int]$deviceNumber) {
         3 { return "Kidcudi123" }
         4 { return "Kidcudi1234" }
         5 { return "Kidcudi12345" }
-        6 { return "Kidcudi123456" }
+        6 { return "Device6" }
         7 { return "Kidcudi1234567" }
+        8 { return "Kidcudi12345678" }
         default { return $null }
     }
 }
@@ -78,7 +80,7 @@ function Invoke-Remote($sessionId, [string]$command) {
 $ok = 0
 $fail = 0
 
-foreach ($device in 1..7) {
+foreach ($device in 1..8) {
     $deviceHost = $HostMap[$device]
     if (-not $deviceHost) {
         Write-WarnMsg "No host mapped for device $device"

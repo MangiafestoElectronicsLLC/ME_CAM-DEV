@@ -8,7 +8,7 @@ from pathlib import Path
 
 def _device_profile(device_number: int, *, framerate: int, stream_quality: int, camera_note: str) -> dict:
     return {
-        "first_run_completed": True,
+        "first_run_completed": False,
         "device_name": f"ME_CAM_{device_number}",
         "device_id": f"pi-cam-{device_number:03d}",
         "resolution": "640x480",
@@ -40,7 +40,7 @@ PROFILES = {
     "device5": _device_profile(5, framerate=30, stream_quality=85, camera_note="Pi Zero 2W field profile (OV547-compatible)"),
     "device6": _device_profile(6, framerate=30, stream_quality=85, camera_note="Pi Zero 2W field profile (camera-swap friendly)"),
     "device7": {
-        "first_run_completed": True,
+        "first_run_completed": False,
         "device_name": "ME_CAM_7",
         "device_id": "pi-cam-007",
         "resolution": "1280x720",
@@ -63,7 +63,18 @@ PROFILES = {
         "hub_mode": True,
         "notes": "Pi 5 testing/hub device - higher resolution and FPS due to 4GB RAM and dual-core GPU",
     },
+    "device8": _device_profile(8, framerate=40, stream_quality=85, camera_note="Pi Zero 2W field deployment #2 (same as D5/D6)"),
 }
+
+
+def _deep_merge(base: dict, override: dict) -> dict:
+    result = copy.deepcopy(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(result.get(key), dict):
+            result[key] = _deep_merge(result[key], value)
+        else:
+            result[key] = copy.deepcopy(value)
+    return result
 
 
 def parse_args() -> argparse.Namespace:
@@ -129,6 +140,19 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
+
+    if output_path.exists():
+        with output_path.open("r", encoding="utf-8") as handle:
+            existing_config = json.load(handle)
+
+        config = _deep_merge(existing_config, config)
+        config["first_run_completed"] = existing_config.get(
+            "first_run_completed", config.get("first_run_completed", False)
+        )
+        config["security"] = _deep_merge(
+            config.get("security", {}),
+            existing_config.get("security", {}),
+        )
 
     with output_path.open("w", encoding="utf-8") as handle:
         json.dump(config, handle, indent=2)

@@ -1,0 +1,37 @@
+{
+    "2": {
+        "hostname": "mecamdev2.local",
+        "password": "YOUR_DEVICE_2_PASSWORD_HERE",
+        "number": "2"
+    },
+    "3": {
+        "hostname": "mecamdev3.local",
+        "password": "YOUR_DEVICE_3_PASSWORD_HERE",
+        "number": "3"
+    },
+    "4": {
+        "hostname": "mecamdev4.local",
+        "password": "YOUR_DEVICE_4_PASSWORD_HERE",
+        "number": "4"
+    },
+    "5": {
+        "hostname": "mecamdev5.local",
+        "password": "YOUR_DEVICE_5_PASSWORD_HERE",
+        "number": "5"
+    },
+    "6": {
+        "hostname": "mecamdev6.local",
+        "password": "YOUR_DEVICE_6_PASSWORD_HERE",
+        "number": "6"
+    },
+    "7": {
+        "hostname": "mecamdev7.local",
+        "password": "YOUR_DEVICE_7_PASSWORD_HERE",
+        "number": "7"
+    },
+    "8": {
+        "hostname": "mecamdev8.local",
+        "password": "YOUR_DEVICE_8_PASSWORD_HERE",
+        "number": "8"
+    }
+}

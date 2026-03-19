@@ -1,0 +1,68 @@
+﻿[
+    {
+        "Device":  "D1",
+        "Host":  "mecamdev1.local",
+        "Status":  "CHECK",
+        "Service":  "//",
+        "Ffmpeg":  "",
+        "Tts":  "",
+        "Aplay":  "",
+        "Health":  "missing",
+        "Notes":  ""
+    },
+    {
+        "Device":  "D2",
+        "Host":  "unreachable",
+        "Status":  "FAILED",
+        "Service":  "unknown",
+        "Ffmpeg":  "unknown",
+        "Tts":  "unknown",
+        "Aplay":  "unknown",
+        "Health":  "unknown",
+        "Notes":  "SSH unreachable"
+    },
+    {
+        "Device":  "D3",
+        "Host":  "mecamdev3.local",
+        "Status":  "CHECK",
+        "Service":  "//",
+        "Ffmpeg":  "",
+        "Tts":  "",
+        "Aplay":  "",
+        "Health":  "missing",
+        "Notes":  ""
+    },
+    {
+        "Device":  "D4",
+        "Host":  "mecamdev4.local",
+        "Status":  "CHECK",
+        "Service":  "//",
+        "Ffmpeg":  "",
+        "Tts":  "",
+        "Aplay":  "",
+        "Health":  "missing",
+        "Notes":  ""
+    },
+    {
+        "Device":  "D5",
+        "Host":  "mecamdev5.local",
+        "Status":  "CHECK",
+        "Service":  "//",
+        "Ffmpeg":  "",
+        "Tts":  "",
+        "Aplay":  "",
+        "Health":  "missing",
+        "Notes":  ""
+    },
+    {
+        "Device":  "D6",
+        "Host":  "mecamdev6.local",
+        "Status":  "CHECK",
+        "Service":  "//",
+        "Ffmpeg":  "",
+        "Tts":  "",
+        "Aplay":  "",
+        "Health":  "missing",
+        "Notes":  ""
+    }
+]

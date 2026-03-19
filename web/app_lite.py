@@ -195,6 +195,150 @@ def _build_arecord_command(audio_path: str, duration_sec: int) -> list[str]:
     return audio_cmd
 
 
+def _detect_aplay_device() -> str | None:
+    preferred = os.environ.get("MECAM_PLAYBACK_DEVICE", "").strip()
+    if preferred:
+        return preferred
+
+    if not shutil.which("aplay"):
+        return None
+
+    try:
+        result = subprocess.run(
+            ["aplay", "-l"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+        cards = []
+        for line in result.stdout.splitlines():
+            line = line.strip()
+            if not line.startswith("card "):
+                continue
+            try:
+                left, _ = line.split(":", 1)
+                card_part, device_part = left.split(",", 1)
+                card_num = card_part.replace("card", "").strip().split()[0]
+                device_num = device_part.replace("device", "").strip().split()[0]
+                cards.append((card_num, device_num, line.lower()))
+            except Exception:
+                continue
+
+        for card_num, device_num, description in cards:
+            if any(token in description for token in ["usb", "speaker", "headphone", "audio", "dac"]):
+                return f"plughw:{card_num},{device_num}"
+        if cards:
+            card_num, device_num, _ = cards[0]
+            return f"plughw:{card_num},{device_num}"
+    except Exception as e:
+        logger.warning(f"[AUDIO] Failed to inspect playback devices: {e}")
+
+    return None
+
+
+def _play_tts_text(text: str) -> tuple[bool, str]:
+    playback_device = _detect_aplay_device()
+    tts_engines = ["espeak", "espeak-ng"]
+
+    for engine in tts_engines:
+        if not shutil.which(engine):
+            continue
+
+        # Route generated PCM stream through ALSA playback when available so
+        # USB audio adapters can be explicitly selected.
+        if shutil.which("aplay"):
+            try:
+                tts_cmd = [engine, "-s", "155", "-a", "120", "--stdout", text]
+                play_cmd = ["aplay", "-q"]
+                if playback_device:
+                    play_cmd.extend(["-D", playback_device])
+
+                tts_proc = subprocess.Popen(tts_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                play_proc = subprocess.Popen(play_cmd, stdin=tts_proc.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                if tts_proc.stdout:
+                    tts_proc.stdout.close()
+
+                _, tts_err = tts_proc.communicate(timeout=14)
+                _, play_err = play_proc.communicate(timeout=14)
+                if tts_proc.returncode == 0 and play_proc.returncode == 0:
+                    return True, f"{engine}+aplay"
+                logger.warning(
+                    f"[AUDIO] {engine}+aplay returned ({tts_proc.returncode}, {play_proc.returncode}) "
+                    f"tts_err={str((tts_err or b'')[:120])} play_err={str((play_err or b'')[:120])}"
+                )
+            except Exception as e:
+                logger.warning(f"[AUDIO] {engine}+aplay pipeline failed: {e}")
+
+        try:
+            result = subprocess.run([engine, "-s", "155", "-a", "120", text], timeout=12, check=False)
+            if result.returncode == 0:
+                return True, engine
+        except Exception as e:
+            logger.warning(f"[AUDIO] {engine} fallback failed: {e}")
+
+    if shutil.which("spd-say"):
+        try:
+            subprocess.run(["spd-say", text], timeout=12, check=False)
+            return True, "spd-say"
+        except Exception as e:
+            logger.warning(f"[AUDIO] spd-say failed: {e}")
+
+    return False, ""
+
+
+def _build_battery_payload(status: dict) -> dict:
+    percent = status.get('percent')
+    has_percent = isinstance(percent, (int, float))
+    if has_percent:
+        percent = max(0, min(100, int(percent)))
+
+    runtime_hours = status.get('runtime_hours')
+    runtime_minutes = status.get('runtime_minutes')
+    has_runtime = isinstance(runtime_hours, int) and isinstance(runtime_minutes, int)
+
+    # Determine display text based on power source and battery percentage
+    power_source = status.get('power_source', 'unknown')
+    if power_source == 'wall_adapter':
+        display_text = "Wall Power"
+    elif power_source == 'usb_adapter':
+        display_text = "USB Adapter"
+    elif power_source == 'powerbank':
+        display_text = "PowerBank" if not has_percent else f"{percent}% (PowerBank)"
+    elif power_source == 'battery':
+        display_text = f"{percent}%" if has_percent else "Battery"
+    elif status.get('external_power'):
+        display_text = "External Power"
+    elif has_percent:
+        display_text = f"{percent}%"
+    else:
+        display_text = "Unknown"
+
+    # Determine health status color
+    if status.get('is_low'):
+        health = 'low'
+    elif has_percent:
+        health = 'good' if percent >= 35 else 'warning'
+    elif status.get('external_power'):
+        health = 'powered'
+    else:
+        health = 'unknown'
+
+    return {
+        'percent': percent if has_percent else None,
+        'runtime_hours': runtime_hours if has_runtime else None,
+        'runtime_minutes': runtime_minutes if has_runtime else None,
+        'external_power': bool(status.get('external_power', False)),
+        'power_source': power_source,
+        'is_low': bool(status.get('is_low', False)),
+        'note': status.get('note', ''),
+        'percent_source': status.get('percent_source', 'unknown'),
+        'battery_present': bool(status.get('battery_present', has_percent)),
+        'display_text': display_text,
+        'health': health,
+    }
+
+
 def _get_security_cfg(cfg: dict) -> dict:
     return cfg.get("security", {}) or {}
 
@@ -1284,6 +1428,7 @@ def create_lite_app(pi_model, camera_config):
             storage_percent = 0
         battery_status = battery.get_status()
         motion_events = get_motion_events()
+        battery_payload = _build_battery_payload(battery_status)
         
         return render_template('dashboard_lite.html',
             device_name=cfg.get('device_name', 'ME Camera'),
@@ -1291,12 +1436,15 @@ def create_lite_app(pi_model, camera_config):
             pi_model=pi_model['name'],
             ram_mb=pi_model['ram_mb'],
             camera_available=bool(camera is not None and camera_available),
-            battery_pct=battery_status.get('percent', 0),
+            battery_pct=battery_payload.get('percent') if battery_payload.get('percent') is not None else 0,
+            battery_text=battery_payload.get('display_text', 'Unknown'),
+            battery_health=battery_payload.get('health', 'unknown'),
             storage=storage,
             storage_percent=storage_percent,
             motion_count=len(motion_events),
             tts_available=bool(shutil.which('espeak') or shutil.which('espeak-ng') or shutil.which('spd-say')),
             audio_playback_available=bool(shutil.which('aplay') or shutil.which('paplay') or shutil.which('ffplay')),
+            mic_capture_available=bool(shutil.which('arecord')),
             version='2.2.3-LITE'
         )
     
@@ -1655,17 +1803,22 @@ def create_lite_app(pi_model, camera_config):
     
     @app.route("/api/battery", methods=["GET"])
     def api_battery():
-        """Battery status"""
+        """Battery status API endpoint"""
         status = battery.get_status()
+        payload = _build_battery_payload(status)
         return jsonify({
-            'percentage': status.get('percent', 0),
-            'percent': status.get('percent', 0),
-            'runtime_hours': status.get('runtime_hours', 0),
-            'runtime_minutes': status.get('runtime_minutes', 0),
-            'external_power': status.get('external_power', False),
-            'is_low': status.get('is_low', False),
-            'note': status.get('note', ''),
-            'percent_source': status.get('percent_source', 'unknown'),
+            'percentage': payload.get('percent'),
+            'percent': payload.get('percent'),
+            'runtime_hours': payload.get('runtime_hours'),
+            'runtime_minutes': payload.get('runtime_minutes'),
+            'external_power': payload.get('external_power'),
+            'power_source': payload.get('power_source'),
+            'is_low': payload.get('is_low'),
+            'note': payload.get('note'),
+            'percent_source': payload.get('percent_source'),
+            'battery_present': payload.get('battery_present'),
+            'display_text': payload.get('display_text'),
+            'health': payload.get('health'),
             'timestamp': datetime.utcnow().isoformat()
         })
 
@@ -1739,21 +1892,11 @@ def create_lite_app(pi_model, camera_config):
 
     @app.route("/api/security/enrollment-key/view", methods=["POST"])
     def api_view_enrollment_key():
-        """Reveal enrollment key only after confirming current account credentials."""
+        """Reveal enrollment key for logged-in users (session auth only, no password re-entry needed)."""
         if 'user' not in session:
             return jsonify({'error': 'Not authenticated'}), 401
 
         try:
-            data = request.get_json() or {}
-            username = (session.get('user') or data.get('username') or '').strip()
-            password = data.get('password') or ''
-
-            if not password:
-                return jsonify({'error': 'Password is required'}), 400
-
-            if not authenticate(username, password):
-                return jsonify({'error': 'Invalid credentials'}), 403
-
             cfg = get_config()
             key = ensure_enrollment_key(cfg=cfg, force_rotate=False, reason='view')
             security_cfg = _ensure_security_cfg(cfg)
@@ -1851,17 +1994,9 @@ def create_lite_app(pi_model, camera_config):
             if len(text) > 160:
                 text = text[:160]
 
-            if shutil.which('espeak'):
-                subprocess.run(['espeak', '-s', '155', '-a', '120', text], timeout=12, check=False)
-                return jsonify({'ok': True, 'message': 'Played on device speaker'})
-
-            if shutil.which('espeak-ng'):
-                subprocess.run(['espeak-ng', '-s', '155', '-a', '120', text], timeout=12, check=False)
-                return jsonify({'ok': True, 'message': 'Played on device speaker'})
-
-            if shutil.which('spd-say'):
-                subprocess.run(['spd-say', text], timeout=12, check=False)
-                return jsonify({'ok': True, 'message': 'Played on device speaker'})
+            played, engine = _play_tts_text(text)
+            if played:
+                return jsonify({'ok': True, 'message': f'Played on device speaker ({engine})'})
 
             return jsonify({'ok': False, 'error': 'No text-to-speech engine found (install espeak)'}), 503
         except Exception as e:
@@ -1870,8 +2005,14 @@ def create_lite_app(pi_model, camera_config):
 
     def _play_audio_file(path: str) -> str:
         """Play an uploaded WAV/PCM file on the device using available tools."""
+        playback_device = _detect_aplay_device()
+        aplay_cmd = ['aplay', '-q']
+        if playback_device:
+            aplay_cmd.extend(['-D', playback_device])
+        aplay_cmd.append(path)
+
         players = [
-            ['aplay', '-q', path],
+            aplay_cmd,
             ['paplay', path],
             ['ffplay', '-nodisp', '-autoexit', '-loglevel', 'quiet', path],
         ]
@@ -1930,6 +2071,60 @@ def create_lite_app(pi_model, camera_config):
                     os.remove(tmp_path)
                 except Exception:
                     pass
+
+    @app.route("/api/audio/listen", methods=["GET"])
+    def api_audio_listen():
+        """Capture a short mic sample from the device and stream it back to browser."""
+        if 'user' not in session:
+            return jsonify({'error': 'Not authenticated'}), 401
+
+        if not shutil.which('arecord'):
+            return jsonify({'ok': False, 'error': 'Microphone capture tool missing (install alsa-utils)'}), 503
+
+        tmp_path = None
+        try:
+            try:
+                duration = int(request.args.get('seconds', '8') or 8)
+            except Exception:
+                duration = 8
+            duration = max(2, min(20, duration))
+
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tmp:
+                tmp_path = tmp.name
+
+            arecord_cmd = _build_arecord_command(tmp_path, duration)
+            result = subprocess.run(arecord_cmd, timeout=duration + 4, capture_output=True, check=False)
+            if result.returncode != 0:
+                err = (result.stderr or b'').decode(errors='ignore')[:160]
+                logger.warning(f"[AUDIO] Listen capture failed ({result.returncode}): {err}")
+                return jsonify({'ok': False, 'error': 'Unable to capture microphone audio'}), 500
+
+            if not os.path.exists(tmp_path) or os.path.getsize(tmp_path) < 64:
+                return jsonify({'ok': False, 'error': 'No microphone audio captured'}), 500
+
+            @after_this_request
+            def cleanup(response):
+                try:
+                    if tmp_path and os.path.exists(tmp_path):
+                        os.remove(tmp_path)
+                except Exception:
+                    pass
+                return response
+
+            return send_file(
+                tmp_path,
+                mimetype='audio/wav',
+                as_attachment=False,
+                download_name=f'listen_{int(time.time())}.wav'
+            )
+        except Exception as e:
+            logger.error(f"[AUDIO] Listen endpoint failed: {e}")
+            if tmp_path and os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except Exception:
+                    pass
+            return jsonify({'ok': False, 'error': str(e)}), 500
     
     @app.route("/api/network/wifi/update", methods=["POST"])
     def api_wifi_update():
@@ -2450,7 +2645,12 @@ def create_lite_app(pi_model, camera_config):
             if requested_provider:
                 sms_cfg['provider'] = requested_provider
 
-            if sms_cfg.get('enabled') and sms_cfg.get('provider') == 'generic_http':
+            # Only validate SMS URL if SMS is newly enabled or provider/URL actually changed
+            sms_was_enabled = cfg.get('notifications', {}).get('sms', {}).get('enabled', False)
+            sms_now_enabled = cfg.get('sms_enabled', False)
+            sms_url_changed = (data.get('sms_api_url', '') != cfg.get('sms_api_url', ''))
+            
+            if (sms_now_enabled and (not sms_was_enabled or sms_url_changed) and sms_cfg.get('provider') == 'generic_http'):
                 parsed = urlparse((cfg.get('sms_api_url') or '').strip())
                 host = (parsed.hostname or '').strip().lower()
                 local_hosts = {'localhost', '127.0.0.1', '0.0.0.0'}

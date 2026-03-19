@@ -44,13 +44,38 @@ logs/
 ################################################################################
 # Configuration & Secrets (LOCAL ONLY - Never commit)
 ################################################################################
-config/config.json
+config/
+config.json
+config/*.json
 config/users.db
 config/*.db
 .env
 .env.local
-secrets.txt
 .env*.local
+secrets.txt
+secrets.json
+credentials.txt
+device_config.json
+device_list.json
+devices.txt
+device_passwords.txt
+device_ips.txt
+
+################################################################################
+# Deployment & SSH (LOCAL ONLY - Never commit)
+################################################################################
+activate_devices_poshssh.ps1
+deploy_devices_*.ps1
+reset_login_*.ps1
+setup_d*.ps1
+check_*.ps1
+*.pem
+*.key
+private.key
+ssh_keys/
+.ssh/
+id_rsa
+id_rsa.pub
 
 ################################################################################
 # Camera & Recording Files (Too large for Git)

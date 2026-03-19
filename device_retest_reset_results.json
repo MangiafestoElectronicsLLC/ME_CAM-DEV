@@ -1,0 +1,50 @@
+﻿[
+    {
+        "Device":  "D1",
+        "Host":  "mecamdev1.local",
+        "Service":  "active",
+        "MotionFiles":  "0",
+        "ApiHealth":  "missing",
+        "Status":  "READY_FOR_RETEST"
+    },
+    {
+        "Device":  "D2",
+        "Host":  "mecamdev2.local",
+        "Service":  "active",
+        "MotionFiles":  "0",
+        "ApiHealth":  "missing",
+        "Status":  "READY_FOR_RETEST"
+    },
+    {
+        "Device":  "D3",
+        "Host":  "mecamdev3.local",
+        "Service":  "active",
+        "MotionFiles":  "0",
+        "ApiHealth":  "missing",
+        "Status":  "READY_FOR_RETEST"
+    },
+    {
+        "Device":  "D4",
+        "Host":  "mecamdev4.local",
+        "Service":  "active",
+        "MotionFiles":  "0",
+        "ApiHealth":  "missing",
+        "Status":  "READY_FOR_RETEST"
+    },
+    {
+        "Device":  "D5",
+        "Host":  "mecamdev5.local",
+        "Service":  "activating inactive",
+        "MotionFiles":  "0",
+        "ApiHealth":  "missing",
+        "Status":  "CHECK"
+    },
+    {
+        "Device":  "D6",
+        "Host":  "mecamdev6.local",
+        "Service":  "active",
+        "MotionFiles":  "0",
+        "ApiHealth":  "missing",
+        "Status":  "READY_FOR_RETEST"
+    }
+]

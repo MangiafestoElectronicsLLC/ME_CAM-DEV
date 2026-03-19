@@ -1,15 +1,17 @@
 [Unit]
 Description=ME Camera Service
-After=network.target
+Wants=network-online.target
+After=network-online.target
 
 [Service]
 Type=simple
 User=pi
 WorkingDirectory=/home/pi/ME_CAM-DEV
-ExecStart=/usr/bin/python3 /home/pi/ME_CAM-DEV/main_lite.py
-Environment="PYTHONPATH=/home/pi/.local/lib/python3.9/site-packages"
+Environment="PATH=/home/pi/ME_CAM-DEV/venv/bin:/usr/bin:/bin"
+ExecStart=/home/pi/ME_CAM-DEV/venv/bin/python3 /home/pi/ME_CAM-DEV/main.py
 Restart=always
 RestartSec=10
+NoNewPrivileges=true
 
 [Install]
 WantedBy=multi-user.target

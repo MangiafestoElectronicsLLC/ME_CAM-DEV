@@ -1,0 +1,47 @@
+{
+    "device_info": {
+        "device_name": "ME_CAM Device 1",
+        "firmware_version": "3.0.0",
+        "hostname": "mecamdev1"
+    },
+    "network": {
+        "port": 8080,
+        "https_port": 8443,
+        "bind_address": "0.0.0.0"
+    },
+    "camera": {
+        "model": "IMX519",
+        "resolution": "1920x1440",
+        "framerate": 30,
+        "brightness": 50,
+        "contrast": 50
+    },
+    "battery": {
+        "avg_current_draw_ma": 600,
+        "battery_capacity_mah": 10000,
+        "enable_monitoring": true,
+        "power_saving_enabled": true
+    },
+    "security": {
+        "https_enabled": true,
+        "security_headers_enabled": true,
+        "encryption_enabled": false,
+        "rate_limiting_enabled": true,
+        "csrf_protection_enabled": true,
+        "password_min_length": 8,
+        "auto_logout_minutes": 60
+    },
+    "recording": {
+        "motion_detection": true,
+        "motion_sensitivity": "medium",
+        "video_quality_auto": true,
+        "video_quality": "720p",
+        "retention_days": 30
+    },
+    "logging": {
+        "level": "INFO",
+        "log_file": "logs/app.log",
+        "max_log_size_mb": 10,
+        "max_backups": 5
+    }
+}

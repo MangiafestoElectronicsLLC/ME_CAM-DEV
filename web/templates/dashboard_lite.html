@@ -146,6 +146,46 @@
             min-height: 16px;
         }
 
+        #speakerCapabilities {
+            width: 100%;
+            font-size: 12px;
+            color: #4b4b4b;
+            margin-top: 2px;
+        }
+
+        .battery-health-tag {
+            display: inline-flex;
+            align-items: center;
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 999px;
+            margin-left: 8px;
+            font-weight: 600;
+            letter-spacing: 0.01em;
+            background: #eceff1;
+            color: #37474f;
+        }
+
+        .battery-health-tag.low {
+            background: #ffebee;
+            color: #b71c1c;
+        }
+
+        .battery-health-tag.warning {
+            background: #fff8e1;
+            color: #8d6e00;
+        }
+
+        .battery-health-tag.powered {
+            background: #e8f5e9;
+            color: #1b5e20;
+        }
+
+        .battery-health-tag.good {
+            background: #e3f2fd;
+            color: #0d47a1;
+        }
+
         @media (max-width: 1020px) {
             .speak-inline {
                 min-width: 100%;
@@ -154,6 +194,24 @@
 
             .speak-inline input[type="text"] {
                 width: 100%;
+            }
+        }
+
+        @media (max-width: 640px) {
+            .speak-inline {
+                gap: 6px;
+            }
+
+            .speak-btn {
+                min-height: 42px;
+                font-size: 13px;
+                padding: 8px 10px;
+                flex: 1 1 calc(50% - 6px);
+            }
+
+            .speak-inline input[type="text"] {
+                font-size: 14px;
+                min-height: 42px;
             }
         }
     </style>
@@ -188,7 +246,7 @@
             <span><strong>ONLINE</strong></span>
         </div>
         <div class="status-item">
-            <span>🔋 Battery: <strong>{{ battery_pct }}%</strong></span>
+            <span>🔋 Battery: <strong id="status-battery-text">{{ battery_text or (battery_pct ~ '%') }}</strong></span>
         </div>
         <div class="status-item">
             <span>💾 Storage: <strong>{{ storage.used_gb }}GB / {{ storage.total_gb }}GB</strong></span>
@@ -220,6 +278,7 @@
                 <div class="speak-inline">
                     <input type="text" id="speakText" placeholder="Type message to play on this device">
                     <button class="speak-btn text" onclick="speakOnDevice()">Speak Text</button>
+                    <button class="speak-btn text" id="listenNowBtn" onclick="listenFromDevice()">Hear Now</button>
                     <button class="speak-btn voice" id="voiceStartBtn" onclick="startVoiceCapture()">Start
                         Voice</button>
                     <button class="speak-btn voice stop" id="voiceStopBtn" onclick="stopVoiceCapture()" disabled>Send
@@ -229,6 +288,23 @@
                     <input type="file" id="voiceUploadInput" accept="audio/*" capture="microphone"
                         style="display: none;" onchange="uploadVoiceFile(event)">
                     <p id="speakStatus"></p>
+                    <p id="speakerCapabilities">
+                        {% if tts_available %}
+                        Text-to-speech ready.
+                        {% else %}
+                        TTS engine missing on device.
+                        {% endif %}
+                        {% if audio_playback_available %}
+                        Voice upload playback ready.
+                        {% else %}
+                        Install alsa-utils for voice playback.
+                        {% endif %}
+                        {% if mic_capture_available %}
+                        Device mic listen-back ready.
+                        {% else %}
+                        Install alsa-utils for live listen-back.
+                        {% endif %}
+                    </p>
                 </div>
             </div>
             <img src="/video_feed" class="camera-feed" alt="Camera Feed">
@@ -273,14 +349,16 @@
                 <h3>🔋 Battery Status</h3>
                 <div class="metric">
                     <span class="metric-label">Charge Level</span>
-                    <span class="metric-value">{{ battery_pct }}%</span>
-                    <div class="metric">
-                        <span class="metric-label">Estimated Runtime</span>
-                        <span class="metric-value" id="battery-runtime">Loading...</span>
-                    </div>
+                    <span class="metric-value" id="battery-level-text">{{ battery_text or (battery_pct ~ '%') }}</span>
+                    <span id="battery-health-tag" class="battery-health-tag {{ battery_health or 'unknown' }}">{{
+                        battery_health or 'unknown' }}</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Estimated Runtime</span>
+                    <span class="metric-value" id="battery-runtime">Loading...</span>
                 </div>
                 <div style="background: #eee; border-radius: 10px; height: 20px; overflow: hidden; margin-top: 10px;">
-                    <div
+                    <div id="battery-bar"
                         style="background: linear-gradient(90deg, #4CAF50 0%, #8BC34A 100%); height: 100%; width: {{ battery_pct }}%; transition: width 0.3s;">
                     </div>
                 </div>
@@ -324,10 +402,49 @@
             fetch('/api/battery')
                 .then(r => r.json())
                 .then(data => {
-                    if (data.runtime_hours !== undefined && data.runtime_minutes !== undefined) {
-                        const runtimeEl = document.getElementById('battery-runtime');
-                        if (runtimeEl) {
+                    const runtimeEl = document.getElementById('battery-runtime');
+                    const levelEl = document.getElementById('battery-level-text');
+                    const statusEl = document.getElementById('status-battery-text');
+                    const barEl = document.getElementById('battery-bar');
+                    const healthTag = document.getElementById('battery-health-tag');
+
+                    if (runtimeEl) {
+                        if (Number.isInteger(data.runtime_hours) && Number.isInteger(data.runtime_minutes)) {
                             runtimeEl.textContent = `${data.runtime_hours}h ${data.runtime_minutes}m`;
+                        } else if (data.external_power) {
+                            runtimeEl.textContent = 'On external power';
+                        } else {
+                            runtimeEl.textContent = 'Runtime unavailable';
+                        }
+                    }
+
+                    const displayText = data.display_text || (data.percent !== null && data.percent !== undefined ? `${data.percent}%` : 'Unknown');
+                    if (levelEl) {
+                        levelEl.textContent = displayText;
+                    }
+                    if (statusEl) {
+                        statusEl.textContent = displayText;
+                    }
+
+                    if (barEl) {
+                        const pct = (data.percent !== null && data.percent !== undefined) ? Math.max(0, Math.min(100, Number(data.percent))) : 100;
+                        barEl.style.width = `${pct}%`;
+                        if (data.health === 'low') {
+                            barEl.style.background = 'linear-gradient(90deg, #ef5350 0%, #e53935 100%)';
+                        } else if (data.health === 'warning') {
+                            barEl.style.background = 'linear-gradient(90deg, #ffb74d 0%, #fb8c00 100%)';
+                        } else {
+                            barEl.style.background = 'linear-gradient(90deg, #4CAF50 0%, #8BC34A 100%)';
+                        }
+                    }
+
+                    if (healthTag) {
+                        const health = (data.health || 'unknown').toLowerCase();
+                        healthTag.className = `battery-health-tag ${health}`;
+                        if (health === 'powered') {
+                            healthTag.textContent = 'external power';
+                        } else {
+                            healthTag.textContent = health;
                         }
                     }
                 })
@@ -474,6 +591,46 @@
                     status.textContent = err.message;
                     status.style.color = '#d32f2f';
                 });
+        }
+
+        async function listenFromDevice() {
+            const status = document.getElementById('speakStatus');
+            const btn = document.getElementById('listenNowBtn');
+            if (!status || !btn) {
+                return;
+            }
+
+            try {
+                btn.disabled = true;
+                status.textContent = 'Capturing microphone audio from device...';
+                status.style.color = '#666';
+
+                const response = await fetch('/api/audio/listen?seconds=8');
+                if (!response.ok) {
+                    let message = 'Unable to capture microphone audio';
+                    try {
+                        const errJson = await response.json();
+                        message = errJson.error || message;
+                    } catch (_) {
+                        // Non-JSON error body; keep generic message.
+                    }
+                    throw new Error(message);
+                }
+
+                const audioBlob = await response.blob();
+                const blobUrl = URL.createObjectURL(audioBlob);
+                const player = new Audio(blobUrl);
+                player.onended = () => URL.revokeObjectURL(blobUrl);
+                await player.play();
+
+                status.textContent = 'Playing live device microphone sample.';
+                status.style.color = '#2e7d32';
+            } catch (err) {
+                status.textContent = err.message || 'Listen failed';
+                status.style.color = '#d32f2f';
+            } finally {
+                btn.disabled = false;
+            }
         }
 
         let voiceCapture = {

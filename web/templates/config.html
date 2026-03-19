@@ -607,16 +607,7 @@
                     <div class="form-group">
                         <label>Current Username</label>
                         <input type="text" id="keyUsername" value="{{ current_user }}" readonly>
-                        <div class="help-text">This is your current signed-in account.</div>
-                    </div>
-                    <div class="form-group">
-                        <label>Current Password</label>
-                        <div class="password-row">
-                            <input type="password" id="keyPassword" placeholder="Current password">
-                            <button type="button" class="secondary-button" onclick="toggleKeyPassword()"
-                                style="margin-top:0;">Show</button>
-                        </div>
-                        <div class="help-text">Enter your login password, then click View Key.</div>
+                        <div class="help-text">Your current signed-in account. Click View Key to load the key.</div>
                     </div>
                 </div>
                 <button type="button" class="secondary-button" onclick="copySecurityKey()">Copy Security Key</button>
@@ -709,11 +700,6 @@
             btn.textContent = isOpen ? 'Show advanced text provider settings' : 'Hide advanced text provider settings';
         }
 
-        function toggleKeyPassword() {
-            const input = document.getElementById('keyPassword');
-            input.type = input.type === 'password' ? 'text' : 'password';
-        }
-
         async function copySecurityKey() {
             const value = (document.getElementById('enrollmentKeyDisplay').value || '').trim();
             if (!value || value.includes('••••')) {
@@ -785,27 +771,20 @@
 
         async function revealSecurityKey() {
             const username = document.getElementById('keyUsername').value.trim();
-            const password = document.getElementById('keyPassword').value;
-
-            if (!password) {
-                showNotification('❌ Enter your current password first', 'error');
-                return;
-            }
 
             try {
                 const response = await fetch('/api/security/enrollment-key/view', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username, password })
+                    body: JSON.stringify({ username })
                 });
                 const data = await response.json();
                 if (!response.ok || !data.ok) {
-                    showNotification('❌ ' + (data.error || 'Unable to verify credentials'), 'error');
+                    showNotification('❌ ' + (data.error || 'Unable to load key'), 'error');
                     return;
                 }
 
                 document.getElementById('enrollmentKeyDisplay').value = data.enrollment_key || 'Unavailable';
-                document.getElementById('keyPassword').value = '';
                 showNotification('✅ Security key loaded', 'success');
             } catch (err) {
                 showNotification('❌ Error: ' + err.message, 'error');

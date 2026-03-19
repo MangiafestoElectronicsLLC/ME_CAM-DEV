@@ -1,0 +1,56 @@
+﻿[
+    {
+        "Device":  "D1",
+        "Host":  "mecamdev1.local",
+        "Reachable":  true,
+        "Service":  "unknown",
+        "Health":  "missing",
+        "MotionFiles":  "unknown",
+        "Notes":  ""
+    },
+    {
+        "Device":  "D2",
+        "Host":  "mecamdev2.local",
+        "Reachable":  true,
+        "Service":  "unknown",
+        "Health":  "missing",
+        "MotionFiles":  "unknown",
+        "Notes":  ""
+    },
+    {
+        "Device":  "D3",
+        "Host":  "mecamdev3.local",
+        "Reachable":  true,
+        "Service":  "unknown",
+        "Health":  "missing",
+        "MotionFiles":  "unknown",
+        "Notes":  ""
+    },
+    {
+        "Device":  "D4",
+        "Host":  "mecamdev4.local",
+        "Reachable":  true,
+        "Service":  "unknown",
+        "Health":  "missing",
+        "MotionFiles":  "unknown",
+        "Notes":  ""
+    },
+    {
+        "Device":  "D5",
+        "Host":  "mecamdev5.local",
+        "Reachable":  true,
+        "Service":  "unknown",
+        "Health":  "missing",
+        "MotionFiles":  "unknown",
+        "Notes":  ""
+    },
+    {
+        "Device":  "D6",
+        "Host":  "mecamdev6.local",
+        "Reachable":  true,
+        "Service":  "unknown",
+        "Health":  "missing",
+        "MotionFiles":  "unknown",
+        "Notes":  ""
+    }
+]

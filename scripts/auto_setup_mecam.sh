@@ -37,8 +37,12 @@ CAMERA_OVERLAY=""
 DEVICE_NUMBER=""
 SD_CAPACITY=""
 HOSTNAME=""
-CONFIG_DIR="$HOME/ME_CAM-DEV/config"
-REPO_DIR="$HOME/ME_CAM-DEV"
+PI_USER_HOME="$(getent passwd pi | cut -d: -f6)"
+if [ -z "$PI_USER_HOME" ]; then
+    PI_USER_HOME="/home/pi"
+fi
+CONFIG_DIR="$PI_USER_HOME/ME_CAM-DEV/config"
+REPO_DIR="$PI_USER_HOME/ME_CAM-DEV"
 
 ##############################################################################
 # Helper Functions
@@ -198,7 +202,12 @@ get_device_number() {
 update_system() {
     log_info "Updating system packages..."
     sudo apt update > /dev/null 2>&1
-    sudo apt upgrade -y > /dev/null 2>&1
+    if [ "${MECAM_FULL_UPGRADE:-0}" = "1" ]; then
+        sudo apt upgrade -y > /dev/null 2>&1
+        log_info "Full OS upgrade applied (MECAM_FULL_UPGRADE=1)"
+    else
+        log_info "Skipping full apt upgrade for faster/safer initial provisioning"
+    fi
     log_success "System updated"
 }
 
@@ -220,6 +229,11 @@ install_dependencies() {
         "libffi-dev"
         "libjpeg-dev"
         "zlib1g-dev"
+        "ffmpeg"
+        "espeak-ng"
+        "alsa-utils"
+        "curl"
+        "jq"
         "git"
     )
     
@@ -308,47 +322,56 @@ create_config() {
     # Create config directory
     mkdir -p "$CONFIG_DIR"
     
-    # Calculate storage limits based on SD card
-    local storage_limit=$((SD_CAPACITY / 2))  # Use half of SD card
-    [ $storage_limit -lt 10 ] && storage_limit=10
-    [ $storage_limit -gt 100 ] && storage_limit=100
-    
-    # Determine framerate based on Pi model and RAM
-    local framerate=30
-    if [[ "$PI_MODEL" == *"Pi 5"* ]]; then
-        framerate=60
-    elif [[ "$PI_MODEL" == *"Pi 4"* ]] && [ $PI_RAM -ge 2048 ]; then
-        framerate=40
+    # Pick profile based on detected camera so OV5647/OV547 devices start with
+    # lower-RAM-safe settings while keeping Pi Zero UX responsive.
+    local profile="device1"
+    if [ "$CAMERA_OVERLAY" = "imx519" ]; then
+        profile="device3"
+    elif [ "$CAMERA_OVERLAY" = "ov547" ] || [ "$CAMERA_OVERLAY" = "ov5647" ]; then
+        profile="device4"
     fi
-    
-    # Create config.json
-    cat > "$CONFIG_DIR/config.json" << EOF
-{
-    "first_run_completed": true,
-    "device_name": "ME_CAM_${DEVICE_NUMBER}",
-    "device_id": "pi-cam-$(printf '%03d' $DEVICE_NUMBER)",
-    "hardware": {
-        "pi_model": "$PI_MODEL",
-        "pi_ram_mb": $PI_RAM,
-        "camera": "$CAMERA_TYPE",
-        "sd_capacity_gb": $SD_CAPACITY
-    },
-    "resolution": "640x480",
-    "framerate": $framerate,
-    "motion_detection": true,
-    "video_length": 30,
-    "storage_limit_gb": $storage_limit,
-    "auto_delete_old": true,
-    "web_port": 8080,
-    "setup_timestamp": "$(date -u +'%Y-%m-%dT%H:%M:%SZ')",
-    "setup_automated": true
-}
-EOF
+
+    cd "$REPO_DIR"
+    python3 scripts/generate_config.py --profile "$profile" --device-number "$DEVICE_NUMBER" --force > /dev/null
+
+    # Apply production defaults for power, security onboarding, and encrypted storage.
+    python3 - << 'PY'
+import json
+from pathlib import Path
+
+cfg_path = Path('config/config.json')
+cfg = json.loads(cfg_path.read_text())
+
+cfg['first_run_completed'] = False
+cfg['powerbank_capacity_mah'] = 10000
+cfg['powerbank_cell_voltage'] = 3.7
+cfg['device_voltage'] = 5.0
+cfg['power_conversion_efficiency'] = 0.85
+cfg['avg_current_draw_ma'] = 300
+cfg['storage_encrypt'] = True
+cfg['storage_encrypted_dir'] = 'recordings_encrypted'
+cfg['motion_record_enabled'] = True
+
+camera = cfg.setdefault('camera', {})
+if not camera.get('stream_fps'):
+    camera['stream_fps'] = 30
+camera.setdefault('stream_quality', 85)
+
+security = cfg.setdefault('security', {})
+security.setdefault('tailscale_only', False)
+security.setdefault('allow_localhost', True)
+security.setdefault('allow_setup_without_vpn', True)
+security.setdefault('share_links_enabled', True)
+security.setdefault('share_link_expiry_hours', 72)
+
+cfg_path.write_text(json.dumps(cfg, indent=2) + '\n')
+PY
     
     log_success "Configuration created"
+    log_info "  - Profile: ${profile}"
     log_info "  - Device Name: ME_CAM_${DEVICE_NUMBER}"
-    log_info "  - Framerate: ${framerate} FPS"
-    log_info "  - Storage Limit: ${storage_limit}GB"
+    log_info "  - Encrypted storage: enabled"
+    log_info "  - First-run account bootstrap: enabled"
 }
 
 ##############################################################################
@@ -373,7 +396,8 @@ setup_service() {
     sudo tee "$service_file" > /dev/null << 'EOF'
 [Unit]
 Description=ME_CAM Security Camera
-After=network.target
+Wants=network-online.target
+After=network-online.target
 
 [Service]
 Type=simple
@@ -383,16 +407,28 @@ Environment="PATH=/home/pi/ME_CAM-DEV/venv/bin:/usr/bin:/bin"
 ExecStart=/home/pi/ME_CAM-DEV/venv/bin/python3 /home/pi/ME_CAM-DEV/main.py
 Restart=always
 RestartSec=10
+NoNewPrivileges=true
 StandardOutput=journal
 StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
 EOF
+
+    # Install watchdog script and optional stability services.
+    sudo install -m 755 "$REPO_DIR/scripts/mecamera_watchdog.sh" /usr/local/bin/mecamera-watchdog.sh
+    sudo install -m 644 "$REPO_DIR/etc/systemd/system/mecamera-watchdog.service" /etc/systemd/system/mecamera-watchdog.service
+    sudo install -m 644 "$REPO_DIR/etc/systemd/system/mecamera-watchdog.timer" /etc/systemd/system/mecamera-watchdog.timer
+    sudo install -m 644 "$REPO_DIR/etc/systemd/system/wifi-powersave-off.service" /etc/systemd/system/wifi-powersave-off.service
     
     # Reload and enable
     sudo systemctl daemon-reload
     sudo systemctl enable mecamera > /dev/null 2>&1
+    sudo systemctl enable wifi-powersave-off.service > /dev/null 2>&1 || true
+    sudo systemctl enable mecamera-watchdog.timer > /dev/null 2>&1 || true
+    sudo systemctl restart wifi-powersave-off.service > /dev/null 2>&1 || true
+    sudo systemctl restart mecamera > /dev/null 2>&1 || true
+    sudo systemctl restart mecamera-watchdog.timer > /dev/null 2>&1 || true
     
     log_success "Systemd service configured"
 }
@@ -415,14 +451,20 @@ configure_camera_overlay() {
         return
     fi
     
-    # Add overlay to config.txt
-    echo "" | sudo tee -a /boot/firmware/config.txt > /dev/null
-    echo "# ME_CAM Camera Configuration" | sudo tee -a /boot/firmware/config.txt > /dev/null
-    echo "camera_auto_detect=0" | sudo tee -a /boot/firmware/config.txt > /dev/null
-    echo "dtoverlay=$CAMERA_OVERLAY" | sudo tee -a /boot/firmware/config.txt > /dev/null
-    echo "gpu_mem=128" | sudo tee -a /boot/firmware/config.txt > /dev/null
+    local profile="auto"
+    if [ "$CAMERA_OVERLAY" = "imx519" ]; then
+        profile="imx519"
+    elif [ "$CAMERA_OVERLAY" = "ov547" ]; then
+        profile="ov547"
+    elif [ "$CAMERA_OVERLAY" = "ov5647" ]; then
+        profile="ov5647"
+    fi
+
+    if [ "$profile" != "auto" ]; then
+        sudo python3 "$REPO_DIR/scripts/set_camera_profile.py" --profile "$profile" || true
+    fi
     
-    log_warn "Camera overlay configured - requires reboot"
+    log_warn "Camera profile configured ($profile) - requires reboot"
 }
 
 ##############################################################################
@@ -486,7 +528,9 @@ print_summary() {
 ##############################################################################
 
 main() {
-    clear
+    if [ -t 1 ] && [ -n "${TERM:-}" ] && [ "${TERM}" != "dumb" ]; then
+        clear || true
+    fi
     
     echo -e "${BLUE}"
     echo "╔════════════════════════════════════════╗"

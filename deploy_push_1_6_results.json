@@ -1,18 +1,27 @@
 ﻿[
     {
         "device":  "1",
-        "target":  "",
-        "reachable":  false,
+        "target":  "mecamdev1.local",
+        "reachable":  true,
         "copied":  [
-
+                       "web/app_lite.py",
+                       "web/templates/config.html",
+                       "web/templates/dashboard_lite.html",
+                       "src/camera/rpicam_streamer.py",
+                       "config/config_default.json",
+                       "src/core/sms_notifier.py",
+                       "src/core/battery_monitor.py",
+                       "src/core/__init__.py",
+                       "src/core/user_auth.py",
+                       "scripts/generate_config.py"
                    ],
         "copy_failed":  [
 
                         ],
-        "service_mecamera":  "",
-        "service_mecamlite":  "",
+        "service_mecamera":  "active",
+        "service_mecamlite":  "inactive",
         "api_preview":  "",
-        "error":  "unreachable"
+        "error":  ""
     },
     {
         "device":  "2",
@@ -129,7 +138,7 @@
         "copy_failed":  [
 
                         ],
-        "service_mecamera":  "activating",
+        "service_mecamera":  "active",
         "service_mecamlite":  "inactive",
         "api_preview":  "",
         "error":  ""

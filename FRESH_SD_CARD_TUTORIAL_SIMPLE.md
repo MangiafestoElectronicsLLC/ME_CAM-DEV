@@ -15,9 +15,25 @@
 **Device Notes:**
 - **Device 3:** Pi Zero 2W + IMX519 over I2C (use IMX519 overlay below)
 - **Device 4:** Pi Zero 2W + OV547 OmniVision (same setup flow as Device 6 with OV547 overlay)
+- **Device 5-6:** Pi Zero 2W field deployment (compatible with any local camera)
 - **Device 7:** Pi 5 (4GB) + Any camera (IMX519 or OV547) — **Recommended for testing/hub**
+- **Device 8:** Pi Zero 2W (fresh provisioning) — *Use this guide with device8 profile*
 
 **Developer Note (Use This Doc):** This guide is the developer/installer workflow. The customer-facing guide is in CUSTOMER_INSTRUCTION_MANUAL.md.
+
+## Fast Path For Reflashed Device 3 Or 8
+
+If you just reflashed **Device 3** or **Device 8**, use this exact order:
+
+1. Flash **Raspberry Pi OS Lite (32-bit)**.
+2. In Raspberry Pi Imager, set hostname to `mecamdev3` or `mecamdev8`, enable SSH, and enter WiFi.
+3. Boot the Pi and wait 2 minutes.
+4. SSH in using hostname or IP.
+5. Install `git`, clone the repo, then run `scripts/auto_setup_mecam.sh`.
+6. For **Device 3**, set the camera profile to `imx519` and reboot.
+7. For **Device 8**, only set a camera profile if the feed is blank after setup.
+
+**Do not run `./scripts/auto_setup_mecam.sh` until after the repo is cloned.**
 
 ---
 
@@ -27,6 +43,9 @@
 - Raspberry Pi Zero 2W
 - IMX519 Camera Module (I2C) for Device 3
 - OV547 Camera Module (OmniVision) for Device 4
+- OV5647 Camera Module (supported via camera profile script)
+- USB 2-way audio microphone/speaker adapter
+- 10,000mAh power bank (optional external power passthrough)
 - MicroSD card (16GB+, 32GB recommended)
 - Power supply (5V 2.5A)
 - Camera ribbon cable
@@ -86,14 +105,81 @@ https://www.raspberrypi.com/software/
 
 ## Step 2: Connect via SSH (2 minutes)
 
-Find your Pi's IP address from your router, or use hostname:
+Find your Pi's IP address from your router, or use hostname.
+
+**Examples:**
 
 ```bash
-ssh pi@mecamdev1.local  # Device 1
+ssh pi@mecamdev1.local
 
 ```
 
+If `.local` does not resolve on Windows, use the Pi's IP address instead.
+
 ## Step 3: Install ME_CAM (20 minutes)
+
+### 3.0 One-Command Production Appliance Install (Recommended)
+For a **fresh SD card**, run these commands in order. This is the shortest working path for **Device 3** and **Device 8**:
+
+```bash
+sudo apt update
+sudo apt install -y git
+cd ~
+git clone https://github.com/MangiafestoElectronicsLLC/ME_CAM-DEV.git
+cd ~/ME_CAM-DEV
+chmod +x scripts/auto_setup_mecam.sh
+./scripts/auto_setup_mecam.sh
+```
+
+If you want the device to behave like a production appliance (auto-boot service, encrypted recordings, watchdog recovery, camera profile automation), the script handles the rest.
+
+The script will:
+1. Auto-detect Pi hardware (Pi Zero 2W vs Pi 5, etc.)
+2. Create appliance config with encrypted motion clips, watchdog timer, auto-reboot on failure
+3. Install all dependencies (FFmpeg, espeak-ng, libcamera, etc.)
+4. Set up systemd service + watchdog timer for production stability
+5. Configure camera profile based on hardware
+
+**After auto-setup completes, set camera profile if needed:**
+
+```bash
+# Device 3 with IMX519:
+cd ~/ME_CAM-DEV
+sudo python3 scripts/set_camera_profile.py --profile imx519
+sudo reboot
+
+# Device 8 with OV5647 (only if needed):
+cd ~/ME_CAM-DEV
+sudo python3 scripts/set_camera_profile.py --profile ov5647
+sudo reboot
+
+# Pi 5 with IMX519:
+sudo python3 scripts/set_camera_profile.py --profile imx519
+sudo reboot
+
+# OV547 camera:
+sudo python3 scripts/set_camera_profile.py --profile ov547
+sudo reboot
+```
+
+After reboot, verify service and health:
+
+```bash
+sudo systemctl status mecamera
+sudo systemctl status mecamera-watchdog.timer
+curl -s http://localhost:8080/api/health
+```
+
+Test dashboard at `http://mecamdev3.local:8080` or `http://mecamdev8.local:8080` or use the Pi IP. Verify production features:
+- ✅ Nanny Cam mode toggle
+- ✅ Security camera mode (motion recording enabled)
+- ✅ Speak Text / Send Voice / Upload Voice  
+- ✅ Hear Now (listen-back from device microphone)
+- ✅ Encrypted motion clips (view, download, share, expiry)
+- ✅ Config page WiFi + core settings
+- ✅ Service auto-restart + watchdog timer active
+
+**If auto-setup fails or you prefer manual control**, follow steps 3.1–3.7 below.
 
 ### 3.1 Update System
 ```bash
@@ -131,6 +217,9 @@ sudo apt install -y \
     libffi-dev \
     libjpeg-dev \
     zlib1g-dev \
+   ffmpeg \
+   espeak-ng \
+   alsa-utils \
     git
 ```
 *(5-7 minutes)*
@@ -188,18 +277,21 @@ python3 scripts/generate_config.py --profile device6 --force
 
 # Device 7 (Pi 5 testing/hub)
 python3 scripts/generate_config.py --profile device7 --force
+
+# Device 8 (Pi Zero 2W field deployment, same as D5/D6)
+python3 scripts/generate_config.py --profile device8 --force
 ```
 
 If `config/config.json` already exists (re-run on same device), use `--force`:
 
 ```bash
-python3 scripts/generate_config.py --profile device3 --force
+python3 scripts/generate_config.py --profile device8 --force
 ```
 
 Optional: set a custom device number while keeping profile defaults:
 
 ```bash
-python3 scripts/generate_config.py --profile device7 --device-number 8 --force
+python3 scripts/generate_config.py --profile device7 --device-number 9 --force
 ```
 
 Verify:
@@ -220,7 +312,14 @@ You should see:
 [FLASK] Starting on 0.0.0.0:8080
 ```
 
-**Test in browser:** `http://mecamdev3.local:8080` or `http://mecamdev4.local:8080` or `http://mecamdev7.local:8080`
+Or for Pi 5:
+```
+[APP] Loading FULL version for Raspberry Pi 5
+[CAMERA] RPiCam initialized: 1280x720 @ 60 FPS
+[FLASK] Starting on 0.0.0.0:8080
+```
+
+**Test in browser:** `http://mecamdev3.local:8080`, `http://mecamdev7.local:8080`, or use your device's set hostname (e.g., `http://mecamdev8.local:8080`)
 
 **First Login Flow (Security):**
 1. Sign in with the temporary admin credentials you created during setup.
@@ -286,13 +385,13 @@ Open browser: `http://mecamdev3.local:8080` or `http://mecamdev4.local:8080` or 
 sudo reboot
 ```
 
-Wait 2 minutes, then check: `http://mecamdev3.local:8080` or `http://mecamdev4.local:8080` or `http://mecamdev7.local:8080`
+Wait 2 minutes, then check: `http://mecamdev.local:8080` or `http://mecamdev.local:8080` or `http://mecamdev.local:8080`
 
 ---
 
 ## ✅ Done!
 
-Your camera is working at: `http://mecamdev3.local:8080` or `http://mecamdev4.local:8080` or `http://mecamdev7.local:8080`
+Your camera is working at: `http://mecamdev.local:8080` or `http://mecamdev.local:8080` or `http://mecamdev.local:8080`
 
 **Performance expectations:**
 - **Pi Zero 2W:** Smooth 30-40 FPS, single camera, minimal resources
@@ -427,8 +526,8 @@ sudo reboot
 
 Then test from your PC:
 ```bash
-ssh pi@mecamdev7.local
-curl http://mecamdev7.local:8080/api/status
+ssh pi@mecamdev.local
+curl http://mecamdev.local:8080/api/status
 ```
 
 If `.local` does not resolve, use IP directly (`http://<device7-ip>:8080`).
@@ -499,7 +598,7 @@ Run this from your Windows workstation in the repo root:
 .\repair_device5_6.ps1
 ```
 
-This pushes and runs `repair_device5_6.sh` on `mecamdev5.local` and `mecamdev6.local`, then:
+This pushes and runs `repair_device5_6.sh` on `mecamdev.local` and `mecamdev.local`, then:
 - hard-resets repo to latest `origin/main` or `origin/master`
 - rebuilds venv with `--system-site-packages`
 - removes accidental `aiortc`/`av` lines from base `requirements.txt`
@@ -510,14 +609,14 @@ This pushes and runs `repair_device5_6.sh` on `mecamdev5.local` and `mecamdev6.l
 Then test each device:
 
 ```bash
-ssh pi@mecamdev5.local
+ssh pi@mecamdev.local
 cd ~/ME_CAM-DEV
 source venv/bin/activate
 python3 main.py
 ```
 
 ```bash
-ssh pi@mecamdev6.local
+ssh pi@mecamdev.local
 cd ~/ME_CAM-DEV
 source venv/bin/activate
 python3 main.py
@@ -594,17 +693,17 @@ sudo systemctl restart mecamera
 3. **Change hostname on each:**
    ```bash
    ssh pi@raspberrypi.local  # Default after clone
-   sudo hostnamectl set-hostname mecamdev7  # Or mecamdev8, etc.
+   sudo hostnamectl set-hostname mecamdev  # Or mecamdev, etc.
    sudo nano /etc/hosts
    # Update line: 127.0.1.1 raspberrypi
-   # To:          127.0.1.1 mecamdev7
+   # To:          127.0.1.1 mecamdev
    sudo reboot
    ```
 
 4. **Verify:**
    ```bash
-   ssh pi@mecamdev7.local
-   hostname  # Should show mecamdev7
+   ssh pi@mecamdev.local
+   hostname  # Should show mecamdev
    curl http://localhost:8080  # Should respond
    ```
 
@@ -612,7 +711,7 @@ sudo systemctl restart mecamera
 
 ```bash
 # Check all at once:
-for device in mecamdev6 mecamdev7 mecamdev8; do
+for device in mecamdev mecamdev mecamdev; do
     echo "=== $device ==="
     ssh pi@$device.local "sudo systemctl is-active mecamera && hostname -I"
 done
