@@ -1,0 +1,115 @@
+# Quick Deployment - You're Already Connected!
+
+Since you're already SSH'd into the Pi, here's the fastest way to complete deployment:
+
+## IN YOUR PI SSH SESSION (currently open):
+
+```bash
+# Navigate to project directory
+cd ~/ME_CAM-DEV
+
+# Create backup
+BACKUP_DIR=backup_v2.1.1_$(date +%Y%m%d_%H%M%S)
+mkdir -p $BACKUP_DIR
+cp src/core/battery_monitor.py $BACKUP_DIR/ 2>/dev/null || echo "Skipped battery_monitor.py"
+cp web/app_lite.py $BACKUP_DIR/
+cp web/templates/dashboard_lite.html $BACKUP_DIR/
+cp web/templates/motion_events.html $BACKUP_DIR/
+echo "✓ Backup created: $BACKUP_DIR"
+
+# Verify transferred files exist
+echo ""
+echo "Checking transferred files:"
+ls -lh web/app_lite.py
+ls -lh web/templates/dashboard_lite.html
+ls -lh web/templates/motion_events.html
+
+# Check if battery_monitor.py exists
+ls -lh src/core/battery_monitor.py 2>/dev/null || echo "⚠ battery_monitor.py needs to be transferred"
+```
+
+## IN YOUR WINDOWS POWERSHELL (separate window):
+
+You've already transferred most files. Just need to add battery_monitor.py:
+
+```powershell
+# Transfer the battery monitoring fix
+scp src\core\battery_monitor.py pi@10.2.1.47:~/ME_CAM-DEV/src/core/
+
+# Password will be prompted
+```
+
+## BACK IN PI SSH SESSION:
+
+```bash
+# Verify all files
+echo ""
+echo "Final verification:"
+ls -lh src/core/battery_monitor.py
+ls -lh web/app_lite.py
+ls -lh web/templates/dashboard_lite.html
+ls -lh web/templates/motion_events.html
+
+# Restart service
+echo ""
+echo "Restarting service..."
+sudo systemctl restart mecamera-lite
+
+# Wait a few seconds
+sleep 5
+
+# Check status
+sudo systemctl status mecamera-lite | head -15
+
+# Check logs
+echo ""
+echo "Recent logs:"
+tail -20 ~/ME_CAM-DEV/logs/mecam_lite.log
+```
+
+## TEST THE DEPLOYMENT:
+
+```bash
+# Test battery API
+curl -s http://localhost:8080/api/battery | python3 -m json.tool
+
+# Test motion events API
+curl -s http://localhost:8080/api/motion/events | python3 -m json.tool | head -30
+
+# Check nanny cam status (will show auth error - that's OK, means server is working)
+curl -s http://localhost:8080/api/nanny-cam/status
+```
+
+## QUICK STATUS CHECK:
+
+```bash
+# All in one command
+cd ~/ME_CAM-DEV && \
+echo "=== Service Status ===" && \
+systemctl is-active mecamera-lite && \
+echo "=== Battery Check ===" && \
+curl -s http://localhost:8080/api/battery | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'Battery: {d[\"percent\"]}% | Runtime: {d[\"runtime_hours\"]}h {d[\"runtime_minutes\"]}m')" && \
+echo "=== Motion Events ===" && \
+curl -s http://localhost:8080/api/motion/events | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'Total: {d[\"count\"]} events')"
+```
+
+## IF YOU NEED TO EXIT SSH:
+
+```bash
+exit
+```
+
+Then from Windows, test web interface:
+```
+https://10.2.1.47:8080
+```
+
+---
+
+## SUMMARY OF WHAT YOU'VE DONE:
+
+✓ Already transferred: app_lite.py, dashboard_lite.html, motion_events.html  
+⚠ Still need: battery_monitor.py  
+✓ Service is running  
+
+Just transfer battery_monitor.py and restart!

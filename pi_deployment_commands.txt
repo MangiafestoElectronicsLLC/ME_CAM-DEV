@@ -1,0 +1,25 @@
+﻿Since you're already SSH'd into the Pi, here are the commands to complete the deployment:
+
+# You're currently in your home directory on the Pi
+# First, navigate to the ME_CAM-DEV directory
+cd ~/ME_CAM-DEV
+
+# Create a backup
+BACKUP_DIR=backup_v2.1.1_$(date +%Y%m%d_%H%M%S)
+mkdir -p $BACKUP_DIR
+cp src/core/battery_monitor.py $BACKUP_DIR/ 2>/dev/null || echo "battery_monitor.py not backed up"
+cp web/app_lite.py $BACKUP_DIR/
+cp web/templates/dashboard_lite.html $BACKUP_DIR/
+cp web/templates/motion_events.html $BACKUP_DIR/
+echo "Backup created in: $BACKUP_DIR"
+
+# Verify the files were transferred from Windows
+ls -lh src/core/battery_monitor.py
+ls -lh web/app_lite.py
+ls -lh web/templates/dashboard_lite.html
+ls -lh web/templates/motion_events.html
+
+# Check service status
+sudo systemctl status mecamera-lite
+
+# You can now exit and transfer remaining files from Windows

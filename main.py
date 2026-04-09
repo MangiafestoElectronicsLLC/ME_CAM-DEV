@@ -67,11 +67,15 @@ logger.info(f"  Device ID:       {device_uuid}")
 # ============================================================================
 
 ram_mb = pi_model_info['ram_mb']
-use_lite = "Zero 2W" in pi_model_info['name'] or ram_mb <= 512
+force_lite = os.environ.get("MECAM_FORCE_LITE", "0") == "1"
+use_lite = force_lite or "Zero 2W" in pi_model_info['name'] or ram_mb <= 512
 
 if use_lite:
     logger.info(f"\n[APP] Loading LITE version for {pi_model_info['name']}")
-    logger.info(f"[APP] Memory constraints: {ram_mb}MB < 1024MB threshold")
+    if force_lite:
+        logger.info("[APP] MECAM_FORCE_LITE=1 set, forcing LITE mode for consistent audio UX")
+    else:
+        logger.info(f"[APP] Memory constraints: {ram_mb}MB < 1024MB threshold")
     
     from web.app_lite import create_lite_app
     from src.utils.pi_detect import get_camera_config

@@ -1,51 +1,39 @@
-# ME_CAM v2.1 - Professional Camera Surveillance System
-### by MangiafestoElectronics LLC
+# ME_CAM v3.0.0
 
-🎥 **Production-ready** Raspberry Pi camera surveillance with multi-device support, motion detection, and comprehensive web dashboard.
+ME_CAM is a Raspberry Pi camera and dashboard stack focused on constrained-device deployment, practical remote visibility, and security controls that can be validated in code and tests.
 
-[![Version](https://img.shields.io/badge/version-2.1-blue.svg)](https://github.com/MangiafestoElectronicsLLC/ME_CAM-DEV/releases)
-[![Python](https://img.shields.io/badge/python-3.9+-green.svg)](https://www.python.org/downloads/)
-[![OS](https://img.shields.io/badge/Raspberry%20Pi%20OS-Bullseye-red.svg)](https://www.raspberrypi.com/software/)
+[![Version](https://img.shields.io/badge/version-3.0.0-blue.svg)](https://github.com/MangiafestoElectronicsLLC/ME_CAM-DEV/releases)
+[![Python](https://img.shields.io/badge/python-3.9%2B-green.svg)](https://www.python.org/downloads/)
+[![Target](https://img.shields.io/badge/target-Raspberry%20Pi-red.svg)](https://www.raspberrypi.com/software/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
----
+## V3 highlights
 
-## ⚠️ **IMPORTANT: Pi Zero 2W Camera Display Limitation**
+- Security middleware with CSRF protection, rate limiting, and response hardening
+- Password hashing and enrollment-key based device onboarding
+- Pi Zero 2W aware lite deployment path
+- Updated release hygiene checks to block lab artifacts from public releases
+- New documentation for GitHub-based device installs and Replit-hosted dashboard flows
+- Security-focused automated tests for auth, headers, CSRF, and rate limiting
 
-**Pi Zero 2W will NOT display live camera** due to hardware constraints (512MB RAM insufficient for 250MB camera buffer). System correctly shows "Camera Hardware Detection Failed" message - this is NOT a bug.
+## Recommended deployment model
 
-**✅ Works on Pi Zero 2W:** Motion detection, recording, battery monitoring, all other features  
-**✅ Camera display works on:** Pi 3B+, Pi 4, Pi 5 (1GB+ RAM)
+- Use a fresh Raspberry Pi OS Lite 32-bit image for Pi Zero 2W deployments
+- Use the lite runtime for constrained devices
+- Treat local device repair scripts, wheel bundles, and result dumps as non-release artifacts
 
-[📖 Read Complete Technical Explanation](PI_ZERO_2W_CAMERA_EXPLANATION.md)
+## Start here
 
----
-
-## ✨ New in v2.1 (January 2026)
-
-### Fixed Issues
-- ✅ **Battery Display**: Now shows accurate percentage (100% on USB power)
-- ✅ **Dashboard Auto-Refresh**: All metrics update every 5 seconds automatically
-- ✅ **Navbar Consistency**: "📡 Devices" link added to all pages
-- ✅ **Multi-Device API**: Fixed device discovery and remote device status
-
-### Documentation Overhaul
-- ✅ **Comprehensive Setup Guide**: Complete [notes.txt](notes.txt) rewrite (22KB, 11 sections)
-- ✅ **Camera Limitation Explained**: Technical deep-dive in [PI_ZERO_2W_CAMERA_EXPLANATION.md](PI_ZERO_2W_CAMERA_EXPLANATION.md)
-- ✅ **Quick Start Guide**: [QUICKSTART.md](QUICKSTART.md) - 60-second setup
-- ✅ **Release Notes**: Professional [GITHUB_V2.1_RELEASE.md](GITHUB_V2.1_RELEASE.md)
-
-### System Improvements
-- ✅ **Pi Model Auto-Detection**: Automatically detects hardware capabilities
-- ✅ **TEST MODE Fallback**: Graceful degradation on insufficient hardware
-- ✅ **Enhanced .gitignore**: Production-ready configuration (14 sections)
-- ✅ **API Documentation**: Complete endpoint reference
+- GitHub-managed Pi install: `docs/GITHUB_INSTALL.md`
+- Replit-hosted dashboard flow: `docs/REPLIT_INSTALL.md`
+- Security controls and disclosure policy: `SECURITY.md`
+- Pi Zero 2W runtime notes: `PI_ZERO_2W_CAMERA_EXPLANATION.md`
 
 ---
 
 ## 🎯 Key Features
 
-### Multi-Device Management (NEW in v2.1)
+### Multi-Device Management
 - **Centralized Dashboard**: Monitor multiple Pi cameras from one interface
 - **Device Discovery**: Automatic detection of remote cameras on network
 - **Individual Device Pages**: Per-device status, battery, storage, recordings
@@ -59,7 +47,7 @@
 - **Fallback Support**: libcamera-still compatibility mode (1-2 FPS)
 - **Live Dashboard**: Real-time MJPEG stream in web browser (Pi 3B+/4/5)
 
-### Dashboard & Web Interface (v2.1 Enhanced)
+### Dashboard & Web Interface
 - **Real-Time Updates**: All metrics refresh every 5 seconds automatically
 - **Accurate Battery Display**: Shows 0-100% with dynamic status
 - **Unified Navbar**: Consistent navigation across all pages
@@ -82,7 +70,7 @@
 - **Real-Time Monitoring**: Dashboard shows storage metrics
 - **Manual Controls**: Delete recordings via web interface
 
-### Battery Monitoring (v2.1 Fixed)
+### Battery Monitoring
 - **Accurate Percentage**: Shows 0-100% based on voltage reading
 - **GPIO Support**: Connect battery to GPIO 17 for monitoring
 - **Dynamic Updates**: Battery status refreshes every 5 seconds
@@ -159,21 +147,20 @@ sudo systemctl start mecamera
 Open browser: **http://raspberrypi.local:8080**  
 Or: **http://[PI-IP-ADDRESS]:8080**
 
-**Default Login:**  
-Username: `admin`  
-Password: `admin123`
+**Authentication:**  
+Create or rotate credentials before exposing the dashboard to any shared network. Avoid relying on example credentials in documentation.
 
 ---
 
 ## 📖 Documentation
 
 ### Quick Reference
-- **[QUICKSTART.md](QUICKSTART.md)** - 60-second setup guide (start here!)
-- **[notes.txt](notes.txt)** - Complete 11-part setup guide from fresh SD card
-- **[GITHUB_V2.1_RELEASE.md](GITHUB_V2.1_RELEASE.md)** - Release notes and API reference
+- **[docs/GITHUB_INSTALL.md](docs/GITHUB_INSTALL.md)** - Step-by-step GitHub deployment guide
+- **[docs/REPLIT_INSTALL.md](docs/REPLIT_INSTALL.md)** - Step-by-step Replit dashboard and enrollment guide
+- **[SECURITY.md](SECURITY.md)** - Security controls, disclosure policy, and deployment guidance
 
 ### Technical Documentation
-- **[PI_ZERO_2W_CAMERA_EXPLANATION.md](PI_ZERO_2W_CAMERA_EXPLANATION.md)** - Why camera fails on Pi Zero 2W
+- **[PI_ZERO_2W_CAMERA_EXPLANATION.md](PI_ZERO_2W_CAMERA_EXPLANATION.md)** - Pi Zero 2W runtime notes
 - **[config/config_default.json](config/config_default.json)** - Configuration options reference
 - **Troubleshooting** - See PART 8 in [notes.txt](notes.txt)
 - **Multi-Device Setup** - See PART 6 in [notes.txt](notes.txt)
@@ -221,7 +208,7 @@ Access all devices from "📡 Devices" page in dashboard.
 
 ---
 
-## 🌐 API Endpoints (v2.1)
+## 🌐 API Endpoints
 
 ### Device Status
 ```bash
@@ -240,7 +227,7 @@ GET /api/devices/<device_id>/battery       # Remote device battery
 GET /api/devices/<device_id>/storage       # Remote device storage
 ```
 
-**Full API Documentation**: See [GITHUB_V2.1_RELEASE.md](GITHUB_V2.1_RELEASE.md)
+**Release note summary**: see the V3 workflow-generated GitHub release notes for the tagged version you ship.
 
 ---
 
@@ -249,9 +236,9 @@ GET /api/devices/<device_id>/storage       # Remote device storage
 ```
 ME_CAM-DEV/
 ├── main.py                      # Application entry point
-├── hub.py                       # Multi-device hub (v2.1)
+├── hub.py                       # Multi-device hub
 ├── requirements.txt             # Python dependencies
-├── notes.txt                    # Complete setup guide (v2.1)
+├── notes.txt                    # Legacy setup guide
 ├── README.md                    # This file
 │
 ├── src/                         # Source code
@@ -268,13 +255,13 @@ ME_CAM-DEV/
 │   │   ├── motion_service.py
 │   │   └── ...
 │   └── utils/                   # Utilities
-│       └── pi_detect.py         # Pi model auto-detection (v2.1)
+│       └── pi_detect.py         # Pi model auto-detection
 │
 ├── web/                         # Web dashboard
 │   ├── app.py                   # Flask application
 │   ├── templates/               # HTML templates
-│   │   ├── user_dashboard.html  # Main dashboard (v2.1 fixed)
-│   │   ├── devices.html         # Multi-device page (v2.1)
+│   │   ├── user_dashboard.html  # Main dashboard
+│   │   ├── devices.html         # Multi-device page
 │   │   └── ...
 │   └── static/                  # CSS, JS, images
 │
@@ -282,7 +269,7 @@ ME_CAM-DEV/
 │   ├── config.json              # User settings (YOU EDIT THIS)
 │   └── config_default.json      # Template reference
 │
-├── certs/                       # SSL certificates (v2.1)
+├── certs/                       # SSL certificates
 │   ├── certificate.pem
 │   └── private_key.pem
 │
@@ -305,7 +292,7 @@ ME_CAM-DEV/
 
 ---
 
-## 🏆 Performance by Pi Model (v2.1)
+## 🏆 Performance by Pi Model
 
 | Pi Model | RAM | Camera FPS | Display? | Best Use |
 |----------|-----|------------|----------|----------|
@@ -421,7 +408,7 @@ curl http://localhost:8080/api/storage/cleanup -X POST
 
 ## 🐛 Troubleshooting
 
-### Common Issues (v2.1)
+### Common Issues
 
 **❌ "Camera Hardware Detection Failed" on Pi Zero 2W**  
 ✅ **This is correct!** Pi Zero 2W has only 512MB RAM (camera needs 250MB+)  
@@ -479,7 +466,7 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 ---
 
-## ✅ Project Status (v2.1)
+## ✅ Project Status
 
 ### Completed
 - ✅ Fast streaming (15-30 FPS)
@@ -506,7 +493,7 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 ## 📝 Changelog
 
-### v2.1.0 (January 15, 2026) - **CURRENT**
+### Legacy V2 notes
 #### Fixed
 - 🐛 Battery display (accurate 0-100%)
 - 🐛 Dashboard auto-refresh (5-sec updates)
@@ -524,7 +511,7 @@ MIT License - see [LICENSE](LICENSE) file for details.
 - 📚 Rewrote [notes.txt](notes.txt) (24KB, LITE MODE guide added)
 - 📚 Created [PI_ZERO_2W_CAMERA_EXPLANATION.md](PI_ZERO_2W_CAMERA_EXPLANATION.md)
 - 📚 Created [QUICKSTART.md](QUICKSTART.md)
-- 📚 Created [GITHUB_V2.1_RELEASE.md](GITHUB_V2.1_RELEASE.md)
+- Updated release documentation is now generated from the V3 workflow and release tag
 - 📚 Updated .gitignore (production-ready)
 
 ### v2.0.0 (January 13, 2026)
@@ -539,13 +526,10 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 ---
 
-**Version**: 2.1.0 (Production Ready)  
-**Last Updated**: January 15, 2026  
-**Branch**: Development (main coming soon)  
+**Version**: 3.0.0  
+**Release posture**: documentation, tests, and release hygiene refreshed for public delivery  
 **Maintained by**: MangiafestoElectronics LLC
 
 ---
 
-**⭐ Star this project on GitHub if it helps you!**
-
-**ME_CAM v2.1 - Professional • Production-Ready • Fully Documented** 📷
+**ME_CAM v3.0.0 - Raspberry Pi focused, security-hardened, and release-gated**

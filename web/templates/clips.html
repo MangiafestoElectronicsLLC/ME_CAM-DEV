@@ -119,7 +119,7 @@
                 </tr>
                 {% endif %}
                 {% for clip in clips %}
-                <tr>
+                <tr id="clip-row-{{ loop.index0 }}">
                     <td>{{ clip.name }}</td>
                     <td>{{ clip.timestamp_str }}</td>
                     <td>{{ clip.size_mb }} MB</td>
@@ -136,6 +136,8 @@
                         {% if share_enabled %}
                         <button onclick="shareClip('{{ clip.name }}')">Share</button>
                         {% endif %}
+                        <button style="background:#ef5350;color:#fff;"
+                            onclick="deleteClip('{{ clip.name }}', 'clip-row-{{ loop.index0 }}')">Delete</button>
                     </td>
                 </tr>
                 {% endfor %}
@@ -173,6 +175,42 @@
                 }
             } catch (e) {
                 shareBox.textContent = e.message || 'Share failed.';
+                shareBox.style.display = 'block';
+            }
+        }
+
+        async function deleteClip(name, rowId) {
+            const shareBox = document.getElementById('shareBox');
+            const player = document.getElementById('clipPlayer');
+            if (!confirm(`Delete clip "${name}"? This cannot be undone.`)) {
+                return;
+            }
+
+            try {
+                const res = await fetch(`/api/clips/${encodeURIComponent(name)}`, {
+                    method: 'DELETE'
+                });
+                const data = await res.json();
+                if (!data.ok) {
+                    throw new Error(data.error || 'Delete failed');
+                }
+
+                const row = document.getElementById(rowId);
+                if (row) {
+                    row.remove();
+                }
+
+                const currentSrc = player.getAttribute('src') || '';
+                if (currentSrc.includes(encodeURIComponent(name))) {
+                    player.pause();
+                    player.removeAttribute('src');
+                    player.load();
+                }
+
+                shareBox.textContent = `Deleted ${name} (${(data.freed_mb ?? 0).toFixed(2)} MB freed)`;
+                shareBox.style.display = 'block';
+            } catch (e) {
+                shareBox.textContent = e.message || 'Delete failed.';
                 shareBox.style.display = 'block';
             }
         }

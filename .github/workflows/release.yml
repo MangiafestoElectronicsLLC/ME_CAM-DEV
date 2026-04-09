@@ -1,110 +1,90 @@
-name: Release v2.1.0
+name: CI and Release
 
 on:
   push:
     branches:
       - main
-    paths:
-      - 'web/**'
-      - 'src/**'
-      - 'config/**'
-      - 'README*.md'
-      - 'requirements.txt'
+    tags:
+      - 'v*'
+  pull_request:
+  workflow_dispatch:
 
 jobs:
-  build:
+  quality:
     runs-on: ubuntu-latest
-    
-    steps:
-    - uses: actions/checkout@v3
-    
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.9'
-    
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install flake8 pytest
-    
-    - name: Lint with flake8
-      run: |
-        flake8 web/ src/ --count --select=E9,F63,F7,F82 --show-source --statistics
-        flake8 web/ src/ --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
-    
-    - name: Test imports
-      run: |
-        python -c "import flask; import cv2; import PIL; print('✅ All imports successful')"
-    
-    - name: Check file sizes
-      run: |
-        ls -lh web/app_lite.py
-        du -sh web/templates/
-        du -sh src/
 
-  security:
-    runs-on: ubuntu-latest
-    
     steps:
-    - uses: actions/checkout@v3
-    
-    - name: Check for credentials
-      run: |
-        if grep -r "api_key\|password\|secret" web/ src/ --include="*.py" | grep -v "config"; then
-          echo "⚠️ Potential credentials found"
-          exit 1
-        fi
-        echo "✅ No hardcoded credentials detected"
-    
-    - name: Check syntax
-      run: |
-        python -m py_compile web/app_lite.py
-        python -m py_compile src/core/*.py
-        echo "✅ Python syntax valid"
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest flake8
+
+      - name: Lint critical Python files
+        run: |
+          flake8 src/core web/app_lite.py tests --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 src/core web/app_lite.py tests --count --max-line-length=120 --statistics
+
+      - name: Compile Python
+        run: |
+          python -m compileall src web tests
+
+      - name: Run security-focused tests
+        run: |
+          pytest -q tests
+
+  release_hygiene:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Block local-only artifact patterns
+        run: |
+          test ! -d wheel_tmp
+          test ! -d _installer_extracted
+          test ! -d venv
+          test ! -d .venv
+          test -z "$(find . -maxdepth 1 -type f -name '_*.py' -print -quit)"
+          test -z "$(find . -maxdepth 1 -type f -name '*_results.json' -print -quit)"
+
+      - name: Scan source for obvious secrets
+        run: |
+          if grep -RInE 'Kidcudi|Kiducdi|DEVICE_TOKEN=|password\s*=\s*["\x27][^"\x27]+' src web scripts tests --include='*.py' --include='*.sh' --include='*.ps1'; then
+            echo 'Potential secret or lab credential detected in tracked source.'
+            exit 1
+          fi
+
+      - name: Check core documentation exists
+        run: |
+          test -f README.md
+          test -f SECURITY.md
+          test -f docs/GITHUB_INSTALL.md
+          test -f docs/REPLIT_INSTALL.md
 
   release:
-    needs: [build, security]
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [quality, release_hygiene]
     runs-on: ubuntu-latest
-    
-    steps:
-    - uses: actions/checkout@v3
-    
-    - name: Create Release
-      uses: actions/create-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        tag_name: v2.1.0
-        release_name: ME Camera v2.1.0
-        body: |
-          ## Features
-          - MP4 video recording (3-second clips)
-          - SMS integration (generic HTTP API)
-          - Timezone support (Eastern Time)
-          - Event management (save/share/download)
-          - Professional documentation
-          
-          ## Tested Hardware
-          - Raspberry Pi Zero 2W
-          - Raspberry Pi 3B+
-          - Raspberry Pi 4
-          - Raspberry Pi 5
-          
-          See RELEASE_NOTES_V2.1.0.md for full details.
-        draft: false
-        prerelease: false
 
-  deploy:
-    needs: release
-    runs-on: ubuntu-latest
-    
     steps:
-    - uses: actions/checkout@v3
-    
-    - name: Notify deployment
-      run: |
-        echo "✅ v2.1.0 Released successfully"
-        echo "🚀 Ready for production deployment"
-        echo "📖 See DEPLOYMENT_V2.1.0.md for instructions"
+      - uses: actions/checkout@v4
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          body: |
+            ME_CAM v3 release.
+
+            Included in this release:
+            - Updated documentation for GitHub and Replit deployment paths
+            - Security-focused test coverage for auth, CSRF, headers, and rate limiting
+            - Stricter release hygiene checks to prevent shipping local lab artifacts

@@ -23,6 +23,8 @@ import shutil
 import asyncio
 import tempfile
 import base64
+import re
+import socket
 from functools import wraps
 import secrets
 import ipaddress
@@ -83,6 +85,158 @@ if os.environ.get("MECAM_ENABLE_V3_MODULES", "0") == "1":
         logger.warning(f"[V3] Remote access not available: {e}")
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+APP_VERSION_LABEL = os.environ.get("MECAM_APP_VERSION", "3.0.0")
+
+AUDIO_DEVICE_CACHE_TTL_SEC = 45
+_AUDIO_DEVICE_CACHE_LOCK = threading.Lock()
+_AUDIO_DEVICE_CACHE = {
+    "capture": {"value": None, "ts": 0.0},
+    "playback": {"value": None, "ts": 0.0},
+}
+
+
+def _current_hostname() -> str:
+    try:
+        return (socket.gethostname() or "mecam").strip().lower()
+    except Exception:
+        return "mecam"
+
+
+def _current_ip() -> str:
+    try:
+        ips = subprocess.check_output(["hostname", "-I"], text=True, timeout=2).strip().split()
+        if ips:
+            return ips[0]
+    except Exception:
+        pass
+    return ""
+
+
+def _normalize_origin(raw: str) -> str:
+    value = (raw or "").strip()
+    if not value:
+        return ""
+    try:
+        parsed = urlparse(value)
+    except Exception:
+        return ""
+    scheme = (parsed.scheme or "").strip().lower()
+    hostname = (parsed.hostname or "").strip().lower()
+    if scheme not in {"http", "https"} or not hostname:
+        return ""
+    port = parsed.port
+    default_port = 443 if scheme == "https" else 80
+    if port and port != default_port:
+        return f"{scheme}://{hostname}:{port}"
+    return f"{scheme}://{hostname}"
+
+
+def _get_allowed_external_origins(cfg: dict) -> list[str]:
+    security = _get_security_cfg(cfg)
+    raw_origins = security.get("allowed_external_origins", [])
+    if isinstance(raw_origins, str):
+        raw_origins = [part.strip() for part in raw_origins.split(",") if part.strip()]
+    env_origins = os.environ.get("MECAM_ALLOWED_ORIGINS", "")
+    if env_origins:
+        raw_origins = list(raw_origins) + [part.strip() for part in env_origins.split(",") if part.strip()]
+
+    allowed = []
+    seen = set()
+    for item in raw_origins:
+        normalized = _normalize_origin(item)
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            allowed.append(normalized)
+    return allowed
+
+
+def _get_request_origin() -> str:
+    return _normalize_origin(request.headers.get("Origin", ""))
+
+
+def _is_origin_allowed(origin: str, cfg: dict) -> bool:
+    if not origin:
+        return False
+    host_origin = _normalize_origin(request.host_url.rstrip("/"))
+    if origin == host_origin:
+        return True
+    return origin in _get_allowed_external_origins(cfg)
+
+
+def _frame_ancestors_value(cfg: dict) -> str:
+    ancestors = ["'self'"]
+    ancestors.extend(_get_allowed_external_origins(cfg))
+    unique = []
+    seen = set()
+    for item in ancestors:
+        if item not in seen:
+            seen.add(item)
+            unique.append(item)
+    return " ".join(unique)
+
+
+def _sanitize_device_id(raw: str) -> str:
+    value = (raw or "").strip().lower()
+    if not value:
+        return ""
+    value = re.sub(r"[^a-z0-9_-]+", "-", value)
+    value = value.strip("-_")
+    return value[:48]
+
+
+def _default_device_name_for_host(hostname: str) -> str:
+    match = re.search(r"(\d+)$", hostname or "")
+    if match:
+        return f"ME_CAM_{match.group(1)}"
+    return "ME_CAM"
+
+
+def _default_device_id(hostname: str, cfg: dict) -> str:
+    host_part = _sanitize_device_id(hostname) or "mecam"
+    token = ((_get_security_cfg(cfg) or {}).get("device_token") or "").strip()
+    token_part = _sanitize_device_id(token[:8]) if token else ""
+    if token_part:
+        return f"{host_part}-{token_part}"
+    return f"{host_part}-{int(time.time()) % 10_000_000:07d}"
+
+
+def _get_app_version(cfg: dict) -> str:
+    info = cfg.get("device_info", {}) or {}
+    configured = (info.get("firmware_version") or "").strip()
+    if configured:
+        return configured
+    return APP_VERSION_LABEL
+
+
+def _normalize_device_identity(cfg: dict) -> bool:
+    """Ensure each device has a stable, unique local identity."""
+    changed = False
+    hostname = _current_hostname()
+
+    raw_name = (cfg.get("device_name") or "").strip()
+    if not raw_name:
+        cfg["device_name"] = _default_device_name_for_host(hostname)
+        changed = True
+
+    raw_id = (cfg.get("device_id") or "").strip()
+    normalized_id = _sanitize_device_id(raw_id)
+    duplicate_defaults = {"", "camera-001", "camera001", "default", "device", "camera"}
+    if normalized_id in duplicate_defaults:
+        normalized_id = _default_device_id(hostname, cfg)
+    if normalized_id and normalized_id != raw_id:
+        cfg["device_id"] = normalized_id
+        changed = True
+
+    info = cfg.get("device_info", {}) or {}
+    if info.get("hostname") != hostname:
+        info["hostname"] = hostname
+        changed = True
+    if info.get("firmware_version") != APP_VERSION_LABEL:
+        info["firmware_version"] = APP_VERSION_LABEL
+        changed = True
+    cfg["device_info"] = info
+
+    return changed
 
 # Offline queues (lightweight JSON logs; safe for Pi Zero 2W)
 OFFLINE_QUEUE_FILE = os.path.join(BASE_DIR, "logs", "offline_queue.json")
@@ -136,12 +290,33 @@ def _save_share_links(links: dict) -> None:
         logger.error(f"[SHARE] Failed to save links: {e}")
 
 
+def _get_cached_audio_device(kind: str) -> tuple[bool, str | None]:
+    now = time.time()
+    with _AUDIO_DEVICE_CACHE_LOCK:
+        cached = _AUDIO_DEVICE_CACHE.get(kind)
+        if not cached:
+            return False, None
+        if now - float(cached.get("ts", 0.0)) <= AUDIO_DEVICE_CACHE_TTL_SEC:
+            return True, cached.get("value")
+    return False, None
+
+
+def _set_cached_audio_device(kind: str, value: str | None) -> None:
+    with _AUDIO_DEVICE_CACHE_LOCK:
+        _AUDIO_DEVICE_CACHE[kind] = {"value": value, "ts": time.time()}
+
+
 def _detect_arecord_device() -> str | None:
     preferred = os.environ.get("MECAM_AUDIO_DEVICE", "").strip()
     if preferred:
         return preferred
 
+    cache_hit, cached = _get_cached_audio_device("capture")
+    if cache_hit:
+        return cached
+
     if not shutil.which("arecord"):
+        _set_cached_audio_device("capture", None)
         return None
 
     try:
@@ -168,13 +343,18 @@ def _detect_arecord_device() -> str | None:
 
         for card_num, device_num, description in cards:
             if any(token in description for token in ["usb", "mic", "microphone", "audio"]):
-                return f"plughw:{card_num},{device_num}"
+                selected = f"plughw:{card_num},{device_num}"
+                _set_cached_audio_device("capture", selected)
+                return selected
         if cards:
             card_num, device_num, _ = cards[0]
-            return f"plughw:{card_num},{device_num}"
+            selected = f"plughw:{card_num},{device_num}"
+            _set_cached_audio_device("capture", selected)
+            return selected
     except Exception as e:
         logger.warning(f"[AUDIO] Failed to inspect capture devices: {e}")
 
+    _set_cached_audio_device("capture", None)
     return None
 
 
@@ -200,7 +380,12 @@ def _detect_aplay_device() -> str | None:
     if preferred:
         return preferred
 
+    cache_hit, cached = _get_cached_audio_device("playback")
+    if cache_hit:
+        return cached
+
     if not shutil.which("aplay"):
+        _set_cached_audio_device("playback", None)
         return None
 
     try:
@@ -227,13 +412,18 @@ def _detect_aplay_device() -> str | None:
 
         for card_num, device_num, description in cards:
             if any(token in description for token in ["usb", "speaker", "headphone", "audio", "dac"]):
-                return f"plughw:{card_num},{device_num}"
+                selected = f"plughw:{card_num},{device_num}"
+                _set_cached_audio_device("playback", selected)
+                return selected
         if cards:
             card_num, device_num, _ = cards[0]
-            return f"plughw:{card_num},{device_num}"
+            selected = f"plughw:{card_num},{device_num}"
+            _set_cached_audio_device("playback", selected)
+            return selected
     except Exception as e:
         logger.warning(f"[AUDIO] Failed to inspect playback devices: {e}")
 
+    _set_cached_audio_device("playback", None)
     return None
 
 
@@ -299,6 +489,11 @@ def _build_battery_payload(status: dict) -> dict:
 
     # Determine display text based on power source and battery percentage
     power_source = status.get('power_source', 'unknown')
+    battery_disabled = not status.get('enabled', True)
+    # No hardware detected when percent AND power_source are both unavailable
+    no_hw = (not has_percent) and power_source == 'unknown' and (
+        status.get('percent_source') in ('unavailable', 'unknown', None) or battery_disabled
+    )
     if power_source == 'wall_adapter':
         display_text = "Wall Power"
     elif power_source == 'usb_adapter':
@@ -311,6 +506,10 @@ def _build_battery_payload(status: dict) -> dict:
         display_text = "External Power"
     elif has_percent:
         display_text = f"{percent}%"
+    elif no_hw:
+        # Device is running but OS has no power-supply interface (no UPS HAT).
+        # Show "Direct Power" instead of the confusing "Unknown".
+        display_text = "Direct Power"
     else:
         display_text = "Unknown"
 
@@ -319,7 +518,7 @@ def _build_battery_payload(status: dict) -> dict:
         health = 'low'
     elif has_percent:
         health = 'good' if percent >= 35 else 'warning'
-    elif status.get('external_power'):
+    elif status.get('external_power') or battery_disabled or no_hw:
         health = 'powered'
     else:
         health = 'unknown'
@@ -369,6 +568,9 @@ def _ensure_security_cfg(cfg: dict) -> dict:
         changed = True
     if "allow_setup_without_vpn" not in security:
         security["allow_setup_without_vpn"] = True
+        changed = True
+    if "allowed_external_origins" not in security:
+        security["allowed_external_origins"] = []
         changed = True
     if "bootstrap_required" not in security:
         security["bootstrap_required"] = False
@@ -428,9 +630,12 @@ def _motion_profile_map() -> dict:
             "motion_percent": 1.8,
             "edge_motion": 1500,
             "mean_diff": 18,
-            "clip_min": 8,
-            "clip_mid": 12,
-            "clip_max": 14,
+            "clip_min": 6,
+            "clip_mid": 10,
+            "clip_max": 16,
+            "min_event_seconds": 6,
+            "trigger_streak_frames": 3,
+            "quiet_stop_seconds": 1.0,
         },
         "balanced": {
             "threshold": 0.012,
@@ -440,9 +645,12 @@ def _motion_profile_map() -> dict:
             "motion_percent": 1.0,
             "edge_motion": 900,
             "mean_diff": 12,
-            "clip_min": 10,
-            "clip_mid": 14,
-            "clip_max": 18,
+            "clip_min": 5,
+            "clip_mid": 9,
+            "clip_max": 14,
+            "min_event_seconds": 5,
+            "trigger_streak_frames": 3,
+            "quiet_stop_seconds": 1.25,
         },
         "high": {
             "threshold": 0.01,
@@ -452,9 +660,12 @@ def _motion_profile_map() -> dict:
             "motion_percent": 0.45,
             "edge_motion": 500,
             "mean_diff": 7,
-            "clip_min": 12,
-            "clip_mid": 18,
-            "clip_max": 24,
+            "clip_min": 4,
+            "clip_mid": 7,
+            "clip_max": 12,
+            "min_event_seconds": 4,
+            "trigger_streak_frames": 2,
+            "quiet_stop_seconds": 1.4,
         },
     }
 
@@ -812,6 +1023,8 @@ def create_lite_app(pi_model, camera_config):
     app = Flask(__name__, template_folder='templates', static_folder='static')
     webrtc_streamer = None
     cfg = get_config()
+    if _normalize_device_identity(cfg):
+        save_config(cfg)
     security = _ensure_security_cfg(cfg)
     app.secret_key = security.get("secret_key")
     app.config.update(
@@ -825,8 +1038,9 @@ def create_lite_app(pi_model, camera_config):
     @app.after_request
     def add_vpn_headers(response):
         """Add headers for VPN and remote access support from ANY network"""
-        origin = request.headers.get('Origin')
-        if origin and origin.startswith(request.host_url.rstrip('/')):
+        cfg = get_config()
+        origin = _get_request_origin()
+        if _is_origin_allowed(origin, cfg):
             response.headers['Access-Control-Allow-Origin'] = origin
             response.headers['Vary'] = 'Origin'
         response.headers['Access-Control-Allow-Credentials'] = 'true'
@@ -842,7 +1056,7 @@ def create_lite_app(pi_model, camera_config):
         response.headers['Expires'] = '0'
         
         # Security headers (but allow VPN/remote access)
-        response.headers['X-Frame-Options'] = 'SAMEORIGIN'
+        response.headers['Content-Security-Policy'] = f"frame-ancestors {_frame_ancestors_value(cfg)}"
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['X-XSS-Protection'] = '1; mode=block'
         
@@ -856,12 +1070,16 @@ def create_lite_app(pi_model, camera_config):
     @app.before_request
     def handle_preflight():
         if request.method == "OPTIONS":
+            cfg = get_config()
             response = Response()
-            origin = request.headers.get('Origin')
-            if origin and origin.startswith(request.host_url.rstrip('/')):
+            origin = _get_request_origin()
+            if _is_origin_allowed(origin, cfg):
                 response.headers['Access-Control-Allow-Origin'] = origin
+                response.headers['Vary'] = 'Origin'
             response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
-            response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
+            response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With'
+            response.headers['Access-Control-Allow-Credentials'] = 'true'
+            response.headers['Content-Security-Policy'] = f"frame-ancestors {_frame_ancestors_value(cfg)}"
             return response
 
     @app.before_request
@@ -877,10 +1095,16 @@ def create_lite_app(pi_model, camera_config):
             return render_template("access_blocked.html"), 403
     
     app_started_at = time.time()
+    motion_runtime = {
+        'lock': threading.Lock(),
+        'stream_clients': 0,
+    }
 
     # Lightweight battery monitor
     battery = BatteryMonitor(enabled=True)
     low_battery_alert_at = {"ts": 0.0}
+    audio_capture_lock = threading.Lock()
+    audio_playback_lock = threading.Lock()
 
     # Background queue flush for offline clips/cloud sync
     def _background_sync():
@@ -911,6 +1135,47 @@ def create_lite_app(pi_model, camera_config):
             time.sleep(5)
 
     threading.Thread(target=_background_sync, daemon=True).start()
+
+    def _cleanup_orphan_motion_files() -> None:
+        """Remove stale tiny motion files left behind by sudden power loss."""
+        try:
+            cfg = get_config()
+            storage_cfg = _get_storage_cfg(cfg)
+            recordings_path = os.path.join(BASE_DIR, storage_cfg["recordings_dir"])
+            if not os.path.isdir(recordings_path):
+                return
+
+            now = time.time()
+            removed = 0
+            for name in os.listdir(recordings_path):
+                if not name.lower().startswith("motion_"):
+                    continue
+                if not name.lower().endswith((".mp4", ".mkv", ".h264", ".h265", ".wav")):
+                    continue
+                path = os.path.join(recordings_path, name)
+                try:
+                    stat = os.stat(path)
+                except Exception:
+                    continue
+
+                age_seconds = now - stat.st_mtime
+                if age_seconds < 180:
+                    continue
+
+                # These tiny files are generally interrupted writes and show up as 0.0MB clips.
+                if stat.st_size <= 2048:
+                    try:
+                        os.remove(path)
+                        removed += 1
+                    except Exception:
+                        pass
+
+            if removed:
+                logger.warning(f"[STORAGE] Removed {removed} stale tiny motion files after startup")
+        except Exception as e:
+            logger.debug(f"[STORAGE] Orphan cleanup skipped: {e}")
+
+    _cleanup_orphan_motion_files()
     
     # Motion recording state
     motion_recorder = {
@@ -964,74 +1229,129 @@ def create_lite_app(pi_model, camera_config):
     camera = None
     camera_available = False
     camera_rotation_mode = detect_camera_rotation() or 'normal'
-    
-    if camera_config['mode'] in ['lite', 'fast']:
+    camera_state_lock = threading.Lock()
+    camera_recovery_state = {
+        'last_attempt': 0.0,
+        'cooldown_seconds': 20.0,
+    }
+
+    def _close_camera_backend(cam_obj) -> None:
+        if not cam_obj:
+            return
         try:
-            stream_cfg = cfg.get('camera', {}) or {}
+            if hasattr(cam_obj, 'stop'):
+                cam_obj.stop()
+        except Exception:
+            pass
+        try:
+            if hasattr(cam_obj, 'close'):
+                cam_obj.close()
+        except Exception:
+            pass
+
+    def _initialize_camera_backend(reason: str = 'startup', force: bool = False) -> bool:
+        nonlocal camera, camera_available
+
+        if camera_config['mode'] not in ['lite', 'fast']:
+            return False
+
+        now = time.time()
+        if not force and (now - camera_recovery_state['last_attempt']) < camera_recovery_state['cooldown_seconds']:
+            return bool(camera is not None and camera_available)
+
+        camera_recovery_state['last_attempt'] = now
+        with camera_state_lock:
+            old_camera = camera
+            old_available = camera_available
+
+            new_camera = None
+            new_available = False
+
             try:
-                stream_fps = int(stream_cfg.get('stream_fps', 20) or 20)
-            except Exception:
-                stream_fps = 20
-            stream_fps = max(5, min(30, stream_fps))
-
-            raw_quality = stream_cfg.get('stream_quality', 85)
-            if isinstance(raw_quality, str):
-                quality_map = {
-                    'low': 70,
-                    'standard': 80,
-                    'high': 90,
-                    'ultra': 95,
-                }
+                stream_cfg = get_config().get('camera', {}) or {}
                 try:
-                    stream_quality = int(raw_quality)
+                    stream_fps = int(stream_cfg.get('stream_fps', 20) or 20)
                 except Exception:
-                    stream_quality = quality_map.get(raw_quality.lower(), 85)
-            else:
-                stream_quality = int(raw_quality)
-            stream_quality = max(50, min(100, stream_quality))
+                    stream_fps = 20
+                stream_fps = max(5, min(30, stream_fps))
 
-            from src.camera import RpicamStreamer, is_rpicam_available
-            rotation_degrees = {
-                'rotate_90': 90,
-                'rotate_180': 180,
-                'rotate_270': 270
-            }.get(camera_rotation_mode, 0)
-            hflip = camera_rotation_mode == 'flip_horizontal'
-            vflip = camera_rotation_mode == 'flip_vertical'
-            
-            if is_rpicam_available():
-                logger.info("[CAMERA] Attempting rpicam-jpeg streaming (OPTIMIZED)...")
-                camera = RpicamStreamer(
-                    width=640,
-                    height=480,
-                    fps=stream_fps,
-                    quality=stream_quality,
-                    rotation=rotation_degrees,
-                    hflip=hflip,
-                    vflip=vflip,
-                )
-                if camera.start():
-                    camera_available = True
-                    logger.success(
-                        f"[CAMERA] RPiCam initialized: 640x480 @ {stream_fps} FPS, "
-                        f"Quality {stream_quality}, rotation={camera_rotation_mode}"
+                raw_quality = stream_cfg.get('stream_quality', 85)
+                if isinstance(raw_quality, str):
+                    quality_map = {
+                        'low': 70,
+                        'standard': 80,
+                        'high': 90,
+                        'ultra': 95,
+                    }
+                    try:
+                        stream_quality = int(raw_quality)
+                    except Exception:
+                        stream_quality = quality_map.get(raw_quality.lower(), 85)
+                else:
+                    stream_quality = int(raw_quality)
+                stream_quality = max(50, min(100, stream_quality))
+
+                from src.camera import RpicamStreamer, is_rpicam_available
+                rotation_degrees = {
+                    'rotate_90': 90,
+                    'rotate_180': 180,
+                    'rotate_270': 270
+                }.get(camera_rotation_mode, 0)
+                hflip = camera_rotation_mode == 'flip_horizontal'
+                vflip = camera_rotation_mode == 'flip_vertical'
+
+                if is_rpicam_available():
+                    logger.info(f"[CAMERA] Attempting camera init ({reason}) with rpicam-jpeg")
+                    new_camera = RpicamStreamer(
+                        width=640,
+                        height=480,
+                        fps=stream_fps,
+                        quality=stream_quality,
+                        rotation=rotation_degrees,
+                        hflip=hflip,
+                        vflip=vflip,
                     )
-            else:
-                logger.warning("[CAMERA] rpicam-jpeg not available, falling back to picamera2...")
-                from picamera2 import Picamera2
-                camera = Picamera2()
-                camera.configure(camera.create_preview_configuration(
-                    main={"size": (640, 480), "format": "RGB888"}
-                ))
-                camera.start()
+                    if new_camera.start():
+                        new_available = True
+                        logger.success(
+                            f"[CAMERA] Camera initialized: 640x480 @ {stream_fps} FPS, "
+                            f"Quality {stream_quality}, rotation={camera_rotation_mode}"
+                        )
+                else:
+                    logger.warning("[CAMERA] rpicam-jpeg unavailable, trying picamera2")
+                    from picamera2 import Picamera2
+                    new_camera = Picamera2()
+                    new_camera.configure(new_camera.create_preview_configuration(
+                        main={"size": (640, 480), "format": "RGB888"}
+                    ))
+                    new_camera.start()
+                    new_available = True
+                    logger.success("[CAMERA] Camera initialized (picamera2): 640x480")
+            except ImportError as e:
+                logger.warning(f"[CAMERA] Module unavailable during {reason}: {e}")
+            except Exception as e:
+                logger.warning(f"[CAMERA] Camera init failed during {reason}: {e}")
+
+            if new_available:
+                if old_camera and old_camera is not new_camera:
+                    _close_camera_backend(old_camera)
+                camera = new_camera
                 camera_available = True
-                logger.success(f"[CAMERA] Camera initialized (picamera2): 640x480")
-        except ImportError as e:
-            logger.warning(f"[CAMERA] Required module not available: {e}")
-        except Exception as e:
-            logger.warning(f"[CAMERA] Camera init failed: {e}")
+                return True
+
+            # If we had a previously running camera, keep it instead of hard-dropping.
+            if old_available and old_camera:
+                camera = old_camera
+                camera_available = True
+                return True
+
+            if new_camera and new_camera is not old_camera:
+                _close_camera_backend(new_camera)
             camera = None
             camera_available = False
+            return False
+
+    _initialize_camera_backend(reason='startup', force=True)
     
     # ============= HELPER FUNCTIONS =============
     
@@ -1156,11 +1476,21 @@ def create_lite_app(pi_model, camera_config):
     
     def get_motion_events():
         """Get all motion events"""
+        events_path = os.path.join(BASE_DIR, "logs", "motion_events.json")
         try:
-            events_path = os.path.join(BASE_DIR, "logs", "motion_events.json")
             if os.path.exists(events_path):
                 with open(events_path, 'r') as f:
                     return json.load(f)
+        except json.JSONDecodeError as e:
+            # Abrupt power loss can truncate JSON; preserve file and recover with empty list.
+            logger.error(f"[MOTION] Events JSON is corrupted, backing up and resetting: {e}")
+            try:
+                corrupt_backup = f"{events_path}.corrupt_{int(time.time())}"
+                os.replace(events_path, corrupt_backup)
+                with open(events_path, 'w') as f:
+                    json.dump([], f)
+            except Exception as backup_error:
+                logger.error(f"[MOTION] Failed to recover corrupted events file: {backup_error}")
         except Exception as e:
             logger.error(f"[MOTION] Load events failed: {e}")
         return []
@@ -1219,8 +1549,16 @@ def create_lite_app(pi_model, camera_config):
 
             cfg = get_config()
             motion_settings = _get_motion_profile_settings(cfg)
-            max_duration = motion_settings["clip_max"] if motion_settings["clip_mode"] == "auto" else max(int(duration_sec), motion_settings["clip_min"])
-            min_duration = min(max_duration, max(int(duration_sec), motion_settings["clip_min"]))
+            requested_duration = max(2, int(duration_sec or motion_settings["clip_mid"]))
+            if motion_settings["clip_mode"] == "auto":
+                min_duration = max(motion_settings["min_event_seconds"], min(requested_duration, motion_settings["clip_mid"]))
+                max_duration = max(min_duration + 1, min(motion_settings["clip_max"], requested_duration + 3))
+            else:
+                fixed_duration = max(5, int(cfg.get("motion_record_duration", requested_duration) or requested_duration))
+                min_duration = fixed_duration
+                max_duration = fixed_duration
+
+            quiet_stop_seconds = float(motion_settings.get("quiet_stop_seconds", 1.5) or 1.5)
 
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"motion_{timestamp}.mp4"
@@ -1244,17 +1582,28 @@ def create_lite_app(pi_model, camera_config):
             audio_path = None
             audio_embedded = False
             audio_sidecar = None
+            audio_lock_acquired = False
 
             # Try to capture audio in parallel when enabled and arecord is present.
             if cfg.get('audio_record_on_motion', True) and shutil.which("arecord"):
                 try:
-                    audio_path = os.path.join(recordings_path, f"motion_{timestamp}.wav")
-                    audio_cmd = _build_arecord_command(audio_path, max_duration)
-                    audio_proc = subprocess.Popen(audio_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    audio_lock_acquired = audio_capture_lock.acquire(blocking=False)
+                    if not audio_lock_acquired:
+                        logger.info("[AUDIO] Motion audio skipped because microphone is busy")
+                    else:
+                        audio_path = os.path.join(recordings_path, f"motion_{timestamp}.wav")
+                        audio_cmd = _build_arecord_command(audio_path, max_duration)
+                        audio_proc = subprocess.Popen(audio_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 except Exception as e:
                     logger.warning(f"[AUDIO] Failed to start audio capture: {e}")
                     audio_proc = None
                     audio_path = None
+                    if audio_lock_acquired:
+                        try:
+                            audio_capture_lock.release()
+                        except Exception:
+                            pass
+                        audio_lock_acquired = False
 
             # Write buffered frames first (captures motion that already happened)
             for frame in buffered_frames:
@@ -1277,7 +1626,7 @@ def create_lite_app(pi_model, camera_config):
                         last_motion_seen = time.time()
 
                     total_frames_written = len(buffered_frames) + additional_frames
-                    if total_frames_written >= min_total_frames and (time.time() - last_motion_seen) >= 1.5:
+                    if total_frames_written >= min_total_frames and (time.time() - last_motion_seen) >= quiet_stop_seconds:
                         break
                     time.sleep(1.0 / fps)
                 except Exception as e:
@@ -1293,6 +1642,13 @@ def create_lite_app(pi_model, camera_config):
                 except Exception:
                     audio_proc.kill()
                 audio_proc = None
+
+            if audio_lock_acquired:
+                try:
+                    audio_capture_lock.release()
+                except Exception:
+                    pass
+                audio_lock_acquired = False
 
             has_audio_capture = bool(audio_path and os.path.exists(audio_path) and os.path.getsize(audio_path) > 1024)
 
@@ -1415,6 +1771,8 @@ def create_lite_app(pi_model, camera_config):
             return redirect(url_for('login'))
 
         cfg = get_config()
+        if _normalize_device_identity(cfg):
+            save_config(cfg)
         security_cfg = _ensure_security_cfg(cfg)
         if security_cfg.get('bootstrap_required') and session.get('user') == security_cfg.get('bootstrap_admin'):
             return redirect(url_for('customer_setup'))
@@ -1445,7 +1803,9 @@ def create_lite_app(pi_model, camera_config):
             tts_available=bool(shutil.which('espeak') or shutil.which('espeak-ng') or shutil.which('spd-say')),
             audio_playback_available=bool(shutil.which('aplay') or shutil.which('paplay') or shutil.which('ffplay')),
             mic_capture_available=bool(shutil.which('arecord')),
-            version='2.2.3-LITE'
+            version=_get_app_version(cfg),
+            device_host=(cfg.get('device_info', {}) or {}).get('hostname', _current_hostname()),
+            device_ip=_current_ip()
         )
     
     @app.route("/login", methods=["GET", "POST"])
@@ -1590,8 +1950,10 @@ def create_lite_app(pi_model, camera_config):
         if request.method == "POST":
             cfg = get_config()
             security_cfg = _ensure_security_cfg(cfg)
-            cfg['device_name'] = request.form.get('device_name', 'ME Camera')
-            cfg['device_id'] = request.form.get('device_id', 'camera-001')
+            requested_name = (request.form.get('device_name', '') or '').strip()
+            requested_id = (request.form.get('device_id', '') or '').strip()
+            cfg['device_name'] = requested_name or _default_device_name_for_host(_current_hostname())
+            cfg['device_id'] = _sanitize_device_id(requested_id) or cfg.get('device_id', '')
             cfg['device_location'] = request.form.get('device_location', '')
             cfg['pin_enabled'] = request.form.get('pin_enabled', False) == 'on'
             cfg['pin_code'] = request.form.get('pin_code', '')
@@ -1618,6 +1980,7 @@ def create_lite_app(pi_model, camera_config):
             cfg.setdefault('google_drive', {})
             cfg['google_drive']['enabled'] = cfg.get('gdrive_enabled', False)
             cfg['google_drive']['folder_id'] = cfg.get('gdrive_folder_id', '')
+            _normalize_device_identity(cfg)
             save_config(cfg)
 
             admin_username = request.form.get('admin_username', '').strip()
@@ -1785,10 +2148,23 @@ def create_lite_app(pi_model, camera_config):
         # This is an MJPEG stream meant to be embedded in authenticated page
         try:
             if camera is None or not camera_available:
+                _initialize_camera_backend(reason='video_feed_request')
+            if camera is None or not camera_available:
                 return Response(generate_test_pattern(), mimetype='multipart/x-mixed-replace; boundary=frame')
             
+            # Track active viewers so background motion keepalive can pause while clients are streaming.
+            def _viewer_stream():
+                with motion_runtime['lock']:
+                    motion_runtime['stream_clients'] += 1
+                try:
+                    for chunk in generate_frames(stream_output=True, internal_keepalive=False):
+                        yield chunk
+                finally:
+                    with motion_runtime['lock']:
+                        motion_runtime['stream_clients'] = max(0, motion_runtime['stream_clients'] - 1)
+
             # BUG FIX #4: Add keep-alive timeout to prevent orphan connections
-            response = Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+            response = Response(_viewer_stream(), mimetype='multipart/x-mixed-replace; boundary=frame')
             response.headers['Connection'] = 'keep-alive'
             response.headers['Keep-Alive'] = 'timeout=300'  # 5 min timeout to force browser reconnect
             response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
@@ -1829,6 +2205,9 @@ def create_lite_app(pi_model, camera_config):
             battery_status = battery.get_status()
             storage = get_storage_info()
             cfg = get_config()
+            if _normalize_device_identity(cfg):
+                save_config(cfg)
+            app_version = _get_app_version(cfg)
 
             # System uptime from kernel when available
             system_uptime_seconds = None
@@ -1844,6 +2223,8 @@ def create_lite_app(pi_model, camera_config):
                 'active': True,
                 'timestamp': time.time(),
                 'device_name': cfg.get('device_name', 'ME_CAM'),
+                'device_id': cfg.get('device_id', 'camera-001'),
+                'version': app_version,
                 'mode': camera_config.get('mode', 'lite'),
                 'camera_available': bool(camera is not None and camera_available),
                 'camera_rotation': camera_rotation_mode,
@@ -1880,9 +2261,15 @@ def create_lite_app(pi_model, camera_config):
     def api_health():
         """Lightweight health probe endpoint for load balancers and watchdogs."""
         try:
+            cfg = get_config()
+            if _normalize_device_identity(cfg):
+                save_config(cfg)
             return jsonify({
                 'ok': True,
                 'service': 'mecamera',
+                'device_name': cfg.get('device_name', 'ME_CAM'),
+                'device_id': cfg.get('device_id', 'camera-001'),
+                'version': _get_app_version(cfg),
                 'camera_available': bool(camera is not None and camera_available),
                 'wifi_connected': is_wifi_connected(),
                 'timestamp': time.time()
@@ -1986,7 +2373,12 @@ def create_lite_app(pi_model, camera_config):
         if 'user' not in session:
             return jsonify({'error': 'Not authenticated'}), 401
 
+        lock_acquired = False
         try:
+            lock_acquired = audio_playback_lock.acquire(blocking=False)
+            if not lock_acquired:
+                return jsonify({'ok': False, 'error': 'Device speaker is busy'}), 409
+
             data = request.get_json() or {}
             text = (data.get('text') or '').strip()
             if not text:
@@ -2002,6 +2394,12 @@ def create_lite_app(pi_model, camera_config):
         except Exception as e:
             logger.error(f"[AUDIO] Speak failed: {e}")
             return jsonify({'ok': False, 'error': str(e)}), 500
+        finally:
+            if lock_acquired:
+                try:
+                    audio_playback_lock.release()
+                except Exception:
+                    pass
 
     def _play_audio_file(path: str) -> str:
         """Play an uploaded WAV/PCM file on the device using available tools."""
@@ -2035,13 +2433,25 @@ def create_lite_app(pi_model, camera_config):
             return jsonify({'error': 'Not authenticated'}), 401
 
         tmp_path = None
+        converted_path = None
+        playback_lock_acquired = False
         try:
             data = request.get_json() or {}
-            audio_b64 = (data.get('audio_wav_base64') or '').strip()
+            audio_b64 = (data.get('audio_base64') or data.get('audio_wav_base64') or '').strip()
             if not audio_b64:
                 return jsonify({'ok': False, 'error': 'Audio payload is required'}), 400
 
+            suffix = '.wav'
             if ',' in audio_b64:
+                header = audio_b64.split(',', 1)[0].lower()
+                if 'audio/webm' in header:
+                    suffix = '.webm'
+                elif 'audio/mp4' in header or 'audio/m4a' in header:
+                    suffix = '.m4a'
+                elif 'audio/mpeg' in header or 'audio/mp3' in header:
+                    suffix = '.mp3'
+                elif 'audio/ogg' in header:
+                    suffix = '.ogg'
                 audio_b64 = audio_b64.split(',', 1)[1]
 
             # Keep payload bounded for Pi Zero memory safety (~4MB raw base64).
@@ -2052,14 +2462,38 @@ def create_lite_app(pi_model, camera_config):
             if len(audio_bytes) < 128:
                 return jsonify({'ok': False, 'error': 'Invalid audio payload'}), 400
 
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tmp:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
                 tmp.write(audio_bytes)
                 tmp.flush()
                 tmp_path = tmp.name
 
-            player = _play_audio_file(tmp_path)
+            play_path = tmp_path
+            if shutil.which('ffmpeg'):
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as converted:
+                    converted_path = converted.name
+
+                ffmpeg_cmd = [
+                    'ffmpeg', '-y',
+                    '-i', tmp_path,
+                    '-ac', '1',
+                    '-ar', '16000',
+                    '-sample_fmt', 's16',
+                    '-af', 'highpass=f=100,lowpass=f=7000,volume=2.5',
+                    converted_path
+                ]
+                ffmpeg_result = subprocess.run(ffmpeg_cmd, timeout=20, capture_output=True, check=False)
+                if ffmpeg_result.returncode == 0 and os.path.exists(converted_path) and os.path.getsize(converted_path) > 128:
+                    play_path = converted_path
+                else:
+                    logger.warning("[AUDIO] ffmpeg conversion/normalization failed for uploaded audio; trying original payload")
+
+            playback_lock_acquired = audio_playback_lock.acquire(blocking=False)
+            if not playback_lock_acquired:
+                return jsonify({'ok': False, 'error': 'Device speaker is busy'}), 409
+
+            player = _play_audio_file(play_path)
             if not player:
-                return jsonify({'ok': False, 'error': 'No audio playback tool found (install alsa-utils)'}), 503
+                return jsonify({'ok': False, 'error': 'Unable to play uploaded audio. Install alsa-utils (and ffmpeg for non-WAV uploads).'}), 503
 
             return jsonify({'ok': True, 'message': f'Voice message played on device ({player})'})
         except Exception as e:
@@ -2069,6 +2503,16 @@ def create_lite_app(pi_model, camera_config):
             if tmp_path and os.path.exists(tmp_path):
                 try:
                     os.remove(tmp_path)
+                except Exception:
+                    pass
+            if converted_path and os.path.exists(converted_path):
+                try:
+                    os.remove(converted_path)
+                except Exception:
+                    pass
+            if playback_lock_acquired:
+                try:
+                    audio_playback_lock.release()
                 except Exception:
                     pass
 
@@ -2082,7 +2526,12 @@ def create_lite_app(pi_model, camera_config):
             return jsonify({'ok': False, 'error': 'Microphone capture tool missing (install alsa-utils)'}), 503
 
         tmp_path = None
+        lock_acquired = False
         try:
+            lock_acquired = audio_capture_lock.acquire(blocking=False)
+            if not lock_acquired:
+                return jsonify({'ok': False, 'error': 'Device microphone is busy'}), 409
+
             try:
                 duration = int(request.args.get('seconds', '8') or 8)
             except Exception:
@@ -2125,6 +2574,12 @@ def create_lite_app(pi_model, camera_config):
                 except Exception:
                     pass
             return jsonify({'ok': False, 'error': str(e)}), 500
+        finally:
+            if lock_acquired:
+                try:
+                    audio_capture_lock.release()
+                except Exception:
+                    pass
     
     @app.route("/api/network/wifi/update", methods=["POST"])
     def api_wifi_update():
@@ -2498,6 +2953,69 @@ def create_lite_app(pi_model, camera_config):
         share_url = f"{request.host_url.rstrip('/')}/share/{token}"
         return jsonify({"ok": True, "share_url": share_url, "expires_at": expires_at})
 
+    @app.route("/api/clips/<filename>", methods=["DELETE"])
+    def api_delete_clip(filename):
+        """Delete a clip from recordings/encrypted storage and detach it from motion events."""
+        if 'user' not in session:
+            return jsonify({'error': 'Not authenticated'}), 401
+
+        try:
+            if '/' in filename or '\\' in filename or '..' in filename:
+                return jsonify({'ok': False, 'error': 'Invalid filename'}), 400
+
+            cfg = get_config()
+            clip_path, _ = _resolve_clip_path(filename, cfg)
+            if not clip_path or not os.path.exists(clip_path):
+                return jsonify({'ok': False, 'error': 'Clip not found'}), 404
+
+            size_mb = os.path.getsize(clip_path) / (1024 * 1024)
+            os.remove(clip_path)
+
+            # Remove related share links so stale public links do not remain active.
+            try:
+                links = _load_share_links()
+                stale_tokens = [token for token, record in links.items() if record.get('filename') == filename]
+                if stale_tokens:
+                    for token in stale_tokens:
+                        links.pop(token, None)
+                    _save_share_links(links)
+            except Exception as link_error:
+                logger.warning(f"[CLIPS] Failed to prune share links for {filename}: {link_error}")
+
+            # Remove references from motion_events entries.
+            try:
+                events_path = os.path.join(BASE_DIR, "logs", "motion_events.json")
+                if os.path.exists(events_path):
+                    with open(events_path, 'r') as f:
+                        events = json.load(f)
+
+                    updated = False
+                    for event in events:
+                        details = event.get('details', {}) or {}
+                        top_level_video = event.get('video_path')
+                        details_video = details.get('video_path')
+                        if top_level_video == filename or details_video == filename:
+                            event['video_path'] = None
+                            event['has_video'] = False
+                            if isinstance(details, dict):
+                                details['video_path'] = None
+                                details['deleted_by_user'] = True
+                                details['deleted_at'] = datetime.utcnow().isoformat()
+                            event['details'] = details
+                            updated = True
+
+                    if updated:
+                        with open(events_path, 'w') as f:
+                            json.dump(events, f, indent=2)
+            except Exception as event_error:
+                logger.warning(f"[CLIPS] Deleted file but failed to update events for {filename}: {event_error}")
+
+            logger.info(f"[CLIPS] Deleted clip: {filename} ({size_mb:.2f}MB)")
+            return jsonify({'ok': True, 'deleted': filename, 'freed_mb': round(size_mb, 2)})
+        except Exception as e:
+            logger.error(f"[CLIPS] Delete failed for {filename}: {e}")
+            return jsonify({'ok': False, 'error': str(e)}), 500
+
     @app.route("/api/clips/share/<token>", methods=["DELETE"])
     def api_revoke_share_link(token):
         """Revoke a share link"""
@@ -2593,6 +3111,8 @@ def create_lite_app(pi_model, camera_config):
             
             # Update settings
             cfg['device_name'] = data.get('device_name', cfg.get('device_name'))
+            if 'device_id' in data:
+                cfg['device_id'] = _sanitize_device_id(data.get('device_id', '')) or cfg.get('device_id', '')
             cfg['device_location'] = data.get('device_location', cfg.get('device_location'))
             cfg['emergency_phone'] = data.get('emergency_phone', cfg.get('emergency_phone'))
             cfg['send_motion_to_emergency'] = data.get('send_motion_to_emergency', False)
@@ -2687,6 +3207,7 @@ def create_lite_app(pi_model, camera_config):
             cfg['storage']['retention_days'] = int(data.get('storage_cleanup_days', 7))
             cfg['storage']['encrypt'] = True
             cfg['storage']['encrypted_dir'] = cfg.get('storage_encrypted_dir', 'recordings_encrypted')
+            _normalize_device_identity(cfg)
             
             save_config(cfg)
             from src.core import reset_sms_notifier
@@ -2848,7 +3369,7 @@ def create_lite_app(pi_model, camera_config):
     
     # ============= FRAME GENERATORS =============
     
-    def generate_frames():
+    def generate_frames(stream_output=True, internal_keepalive=False):
         """Generate camera frames with motion detection and video recording"""
         import cv2
         import numpy as np
@@ -2903,17 +3424,56 @@ def create_lite_app(pi_model, camera_config):
                 if not out.isOpened():
                     logger.error("[MOTION] Could not open video writer")
                     return
+
+                cfg = get_config()
+                motion_settings = _get_motion_profile_settings(cfg)
+                requested_duration = max(2, int(duration_sec or motion_settings["clip_mid"]))
+                if motion_settings["clip_mode"] == "auto":
+                    min_duration = max(motion_settings["min_event_seconds"], min(requested_duration, motion_settings["clip_mid"]))
+                    max_duration = max(min_duration + 1, min(motion_settings["clip_max"], requested_duration + 3))
+                else:
+                    fixed_duration = max(5, int(cfg.get("motion_record_duration", requested_duration) or requested_duration))
+                    min_duration = fixed_duration
+                    max_duration = fixed_duration
+                quiet_stop_seconds = float(motion_settings.get("quiet_stop_seconds", 1.5) or 1.5)
+
+                audio_proc = None
+                audio_path = None
+                audio_embedded = False
+                audio_sidecar = None
+                audio_lock_acquired = False
+
+                if cfg.get('audio_record_on_motion', True) and shutil.which("arecord"):
+                    try:
+                        audio_lock_acquired = audio_capture_lock.acquire(blocking=False)
+                        if not audio_lock_acquired:
+                            logger.info("[AUDIO] Motion audio skipped in rpicam path because microphone is busy")
+                        else:
+                            audio_path = os.path.join(recordings_path, f"motion_{timestamp}.wav")
+                            audio_cmd = _build_arecord_command(audio_path, max_duration)
+                            audio_proc = subprocess.Popen(audio_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    except Exception as e:
+                        logger.warning(f"[AUDIO] Failed to start rpicam audio capture: {e}")
+                        audio_proc = None
+                        audio_path = None
+                        if audio_lock_acquired:
+                            try:
+                                audio_capture_lock.release()
+                            except Exception:
+                                pass
+                            audio_lock_acquired = False
                 
                 # Write pre-motion frames first
                 for frame in frames_list:
                     out.write(frame)
 
-                # Continue appending live frames without buffering entire clip in RAM
-                target_frames = max(len(frames_list), int(max(3, duration_sec) * fps))
+                previous_gray = cv2.cvtColor(frames_list[-1], cv2.COLOR_BGR2GRAY)
+                min_total_frames = max(len(frames_list), int(min_duration * fps))
+                max_total_frames = max(min_total_frames, int(max_duration * fps))
                 appended_frames = len(frames_list)
-                append_deadline = time.time() + max(3, duration_sec) + 1
+                last_motion_seen = time.time()
 
-                while appended_frames < target_frames and time.time() < append_deadline:
+                while appended_frames < max_total_frames:
                     next_frame = None
                     if hasattr(camera, 'get_jpeg_frame'):
                         live_jpeg = camera.get_jpeg_frame()
@@ -2929,11 +3489,74 @@ def create_lite_app(pi_model, camera_config):
                         out.write(next_frame)
                         appended_frames += 1
 
+                        current_gray = cv2.cvtColor(next_frame, cv2.COLOR_BGR2GRAY)
+                        diff = cv2.absdiff(previous_gray, current_gray)
+                        blur = cv2.GaussianBlur(diff, (11, 11), 0)
+                        _, thresh = cv2.threshold(blur, 24, 255, cv2.THRESH_BINARY)
+                        thresh = cv2.dilate(thresh, None, iterations=1)
+                        motion_ratio_now = cv2.countNonZero(thresh) / float(current_gray.shape[0] * current_gray.shape[1])
+                        mean_diff_now = float(diff.mean())
+                        if motion_ratio_now > (motion_settings["threshold"] * 0.75) or mean_diff_now > (motion_settings["mean_diff"] * 0.8):
+                            last_motion_seen = time.time()
+                        previous_gray = current_gray
+
+                    if appended_frames >= min_total_frames and (time.time() - last_motion_seen) >= quiet_stop_seconds:
+                        break
+
                     time.sleep(1.0 / fps)
+
+                if audio_proc:
+                    try:
+                        audio_proc.wait(timeout=max_duration + 2)
+                    except Exception:
+                        audio_proc.kill()
+                    audio_proc = None
+
+                if audio_lock_acquired:
+                    try:
+                        audio_capture_lock.release()
+                    except Exception:
+                        pass
+                    audio_lock_acquired = False
                 
                 out.release()
-                
-                cfg = get_config()
+
+                has_audio_capture = bool(audio_path and os.path.exists(audio_path) and os.path.getsize(audio_path) > 1024)
+                if has_audio_capture and shutil.which("ffmpeg"):
+                    try:
+                        muxed_path = video_path.replace(".mp4", "_av.mp4")
+                        mux_cmd = [
+                            "ffmpeg", "-y",
+                            "-loglevel", "error",
+                            "-i", video_path,
+                            "-i", audio_path,
+                            "-c:v", "copy",
+                            "-c:a", "aac",
+                            "-shortest",
+                            "-movflags", "+faststart",
+                            muxed_path
+                        ]
+                        mux_timeout = max(30, int(max_duration) * 4)
+                        subprocess.run(mux_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False, timeout=mux_timeout)
+                        if os.path.exists(muxed_path):
+                            os.replace(muxed_path, video_path)
+                            audio_embedded = True
+                            logger.info(f"[AUDIO] Embedded audio into {video_filename}")
+                        else:
+                            logger.warning("[AUDIO] rpicam mux failed; keeping video-only file")
+                    except Exception as e:
+                        logger.warning(f"[AUDIO] rpicam mux error: {e}")
+                    finally:
+                        if audio_embedded:
+                            try:
+                                if audio_path and os.path.exists(audio_path):
+                                    os.remove(audio_path)
+                            except Exception:
+                                pass
+                elif has_audio_capture:
+                    audio_sidecar = os.path.basename(audio_path)
+                    logger.warning("[AUDIO] ffmpeg unavailable in rpicam path; keeping sidecar WAV file")
+
                 final_path, encrypted = _encrypt_clip_if_enabled(video_path, cfg)
                 final_name = os.path.basename(final_path)
                 file_size = os.path.getsize(final_path) / (1024 * 1024)
@@ -2957,6 +3580,8 @@ def create_lite_app(pi_model, camera_config):
                                 event['details']['video_path'] = final_name
                                 event['details']['mode'] = 'lite'
                                 event['details']['encrypted'] = encrypted
+                                event['details']['audio_embedded'] = audio_embedded
+                                event['details']['audio_sidecar'] = audio_sidecar
                                 upload_id = _queue_cloud_upload(final_path, meta={
                                     "event_id": event_id,
                                     "type": event.get("type"),
@@ -2990,8 +3615,17 @@ def create_lite_app(pi_model, camera_config):
             try:
                 maybe_flush_queues()
 
+                # In keepalive mode, pause motion loop while a real client is streaming.
+                if internal_keepalive:
+                    with motion_runtime['lock']:
+                        if motion_runtime['stream_clients'] > 0:
+                            time.sleep(0.25)
+                            continue
+
                 if camera is None:
-                    break
+                    _initialize_camera_backend(reason='frame_loop_null_camera')
+                    time.sleep(0.5)
+                    continue
                 
                 # Check if using RpicamStreamer or picamera2
                 if hasattr(camera, 'get_jpeg_frame'):
@@ -3005,8 +3639,13 @@ def create_lite_app(pi_model, camera_config):
                                 if camera.restart():
                                     no_frame_count = 0
                                     logger.success("[CAMERA] rpicam streamer restarted")
+                                else:
+                                    camera_available = False
+                                    _initialize_camera_backend(reason='stream_stalled_restart_failed')
                             except Exception as restart_error:
                                 logger.error(f"[CAMERA] Restart failed: {restart_error}")
+                                camera_available = False
+                                _initialize_camera_backend(reason='stream_stalled_exception')
                         time.sleep(0.05)
                         continue
 
@@ -3048,6 +3687,7 @@ def create_lite_app(pi_model, camera_config):
                                     significant_contours = sum(1 for c in contours if cv2.contourArea(c) >= min_area)
                                     trigger_now = motion_ratio > motion_threshold and significant_contours > 0
                                     motion_streak = (motion_streak + 1) if trigger_now else max(0, motion_streak - 1)
+                                    trigger_required = max(1, int(motion_settings.get('trigger_streak_frames', 2) or 2))
                                     
                                     cfg = get_config()
                                     nanny_cam = cfg.get('nanny_cam_enabled', False)
@@ -3055,11 +3695,11 @@ def create_lite_app(pi_model, camera_config):
 
                                     # Motion detected and not in cooldown
                                     cooldown_active = time.time() < motion_cooldown_until
-                                    if motion_streak >= 1 and not cooldown_active and not recording:
+                                    if motion_streak >= trigger_required and not cooldown_active and not recording:
                                         if nanny_cam or not motion_enabled:
                                             motion_streak = 0
                                         else:
-                                            logger.info(f"[MOTION] Motion detected: {motion_ratio*100:.1f}% pixels")
+                                            logger.info(f"[MOTION] Motion detected: {motion_ratio*100:.1f}% pixels, streak={motion_streak}/{trigger_required}")
 
                                             # Log motion event and get event_id
                                             event_data = log_motion_event('motion', motion_ratio, {
@@ -3117,8 +3757,9 @@ def create_lite_app(pi_model, camera_config):
                             recording = False
                             logger.info("[MOTION] Recording window complete")
                     
-                    yield (b'--frame\r\n'
-                           b'Content-Type: image/jpeg\r\n\r\n' + jpeg_bytes + b'\r\n')
+                    if stream_output:
+                        yield (b'--frame\r\n'
+                               b'Content-Type: image/jpeg\r\n\r\n' + jpeg_bytes + b'\r\n')
                     time.sleep(0.03)  # ~33 FPS to reduce CPU and memory pressure on Pi Zero
                     continue
                 
@@ -3157,8 +3798,9 @@ def create_lite_app(pi_model, camera_config):
                     buf.close()
                     del buf
                     
-                    yield (b'--frame\r\n'
-                           b'Content-Type: image/jpeg\r\n\r\n' + jpeg_bytes + b'\r\n')
+                    if stream_output:
+                        yield (b'--frame\r\n'
+                               b'Content-Type: image/jpeg\r\n\r\n' + jpeg_bytes + b'\r\n')
                     time.sleep(0.033)
                     continue
                 
@@ -3329,8 +3971,9 @@ def create_lite_app(pi_model, camera_config):
                 buf.close()
                 del buf
                 
-                yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + jpeg_bytes + b'\r\n')
+                if stream_output:
+                    yield (b'--frame\r\n'
+                           b'Content-Type: image/jpeg\r\n\r\n' + jpeg_bytes + b'\r\n')
                 
                 time.sleep(0.033)  # ~30 FPS for better responsiveness
             except Exception as e:
@@ -3343,10 +3986,36 @@ def create_lite_app(pi_model, camera_config):
                             stream_error_count = 0
                             no_frame_count = 0
                             logger.success("[CAMERA] Camera backend restarted")
+                        else:
+                            camera_available = False
+                            _initialize_camera_backend(reason='frame_error_restart_failed')
                     except Exception as restart_error:
                         logger.error(f"[CAMERA] Backend restart failed: {restart_error}")
+                        camera_available = False
+                        _initialize_camera_backend(reason='frame_error_restart_exception')
                 time.sleep(0.1)
                 continue
+
+    def _motion_keepalive_worker():
+        """Keep motion detection active even when no user is viewing /video_feed."""
+        # Small startup delay allows camera init to complete first.
+        logger.info("[MOTION] Keepalive worker starting (motion stays active without open live view)")
+        time.sleep(2.0)
+        while True:
+            try:
+                if camera is None or not camera_available:
+                    _initialize_camera_backend(reason='keepalive_recovery')
+                    time.sleep(1.0)
+                    continue
+                for _ in generate_frames(stream_output=False, internal_keepalive=True):
+                    # Internal keepalive consumes frames only for motion logic.
+                    pass
+            except Exception as e:
+                logger.warning(f"[MOTION] Keepalive worker error: {e}")
+                time.sleep(1.0)
+
+    threading.Thread(target=_motion_keepalive_worker, daemon=True).start()
+    logger.info("[MOTION] Keepalive worker launched")
     
     def generate_test_pattern():
         """Generate test pattern"""
@@ -3613,7 +4282,7 @@ def create_lite_app(pi_model, camera_config):
             "authenticated": 'user' in session,
             "connection_type": "vpn" if "100." in client_ip else "direct",
             "tips": {
-                "local": f"http://{info.get('local_ip', 'LOCAL_IP')}:8080",
+                "local": request.host_url.rstrip('/'),
                 "tailscale": "Install Tailscale for secure VPN access",
                 "port_forward": "Configure port forwarding on your router"
             }

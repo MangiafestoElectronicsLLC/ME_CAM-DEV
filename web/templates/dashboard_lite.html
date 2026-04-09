@@ -99,13 +99,41 @@
             background: #e04557;
         }
 
-        .speak-inline {
+        .header-actions {
             display: flex;
             align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+        }
+
+        .device-route-pill {
+            display: inline-flex;
+            align-items: center;
+            background: #eef3ff;
+            color: #2c4ea0;
+            border: 1px solid #d7e2ff;
+            border-radius: 999px;
+            padding: 4px 10px;
+            font-size: 12px;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .speak-inline {
+            display: flex;
+            align-items: flex-start;
             gap: 8px;
             flex-wrap: wrap;
             justify-content: flex-end;
             min-width: 360px;
+        }
+
+        .speak-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            justify-content: flex-end;
         }
 
         .speak-inline input[type="text"] {
@@ -124,6 +152,11 @@
             font-weight: 600;
             cursor: pointer;
             color: white;
+        }
+
+        .speak-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
         }
 
         .speak-btn.text {
@@ -192,21 +225,42 @@
                 justify-content: flex-start;
             }
 
+            .speak-actions {
+                justify-content: flex-start;
+            }
+
             .speak-inline input[type="text"] {
                 width: 100%;
             }
         }
 
         @media (max-width: 640px) {
+            .header-actions {
+                width: 100%;
+                justify-content: flex-start;
+            }
+
+            .device-route-pill {
+                width: 100%;
+                justify-content: center;
+            }
+
             .speak-inline {
                 gap: 6px;
             }
 
+            .speak-actions {
+                width: 100%;
+                display: grid;
+                grid-template-columns: repeat(2, minmax(120px, 1fr));
+                gap: 6px;
+            }
+
             .speak-btn {
-                min-height: 42px;
+                min-height: 40px;
                 font-size: 13px;
                 padding: 8px 10px;
-                flex: 1 1 calc(50% - 6px);
+                width: 100%;
             }
 
             .speak-inline input[type="text"] {
@@ -224,8 +278,10 @@
                 <h1>📷 {{ device_name }}</h1>
                 <small style="color: #666;">{{ device_id }} | {{ pi_model }} ({{ ram_mb }}MB RAM)</small>
             </div>
-            <div style="display: flex; align-items: center; gap: 15px;">
+            <div class="header-actions">
                 <span class="lite-badge">🔒 Pi Zero Version v{{ version }}</span>
+                <span class="device-route-pill">Serving from {{ device_host }}{% if device_ip %} ({{ device_ip }}){%
+                    endif %}</span>
                 <a href="/config" class="logout-btn" style="background: #667eea; color: white;">⚙️ Config</a>
                 <a href="/motion-events" class="logout-btn" style="background: #ff9800; color: white;">📊 Events</a>
                 <a href="/clips" class="logout-btn" style="background: #4caf50; color: white;">📁 Clips</a>
@@ -277,14 +333,17 @@
                 </div>
                 <div class="speak-inline">
                     <input type="text" id="speakText" placeholder="Type message to play on this device">
-                    <button class="speak-btn text" onclick="speakOnDevice()">Speak Text</button>
-                    <button class="speak-btn text" id="listenNowBtn" onclick="listenFromDevice()">Hear Now</button>
-                    <button class="speak-btn voice" id="voiceStartBtn" onclick="startVoiceCapture()">Start
-                        Voice</button>
-                    <button class="speak-btn voice stop" id="voiceStopBtn" onclick="stopVoiceCapture()" disabled>Send
-                        Voice</button>
-                    <button class="speak-btn text" id="voiceUploadBtn" onclick="triggerVoiceUpload()">Upload
-                        Voice</button>
+                    <div class="speak-actions">
+                        <button class="speak-btn text" onclick="speakOnDevice()">Speak Text</button>
+                        <button class="speak-btn text" id="listenNowBtn" onclick="listenFromDevice()">Hear Now</button>
+                        <button class="speak-btn voice" id="voiceStartBtn" onclick="startVoiceCapture()">Start
+                            Voice</button>
+                        <button class="speak-btn voice stop" id="voiceStopBtn" onclick="stopVoiceCapture()"
+                            disabled>Send
+                            Voice</button>
+                        <button class="speak-btn text" id="voiceUploadBtn" onclick="triggerVoiceUpload()">Upload
+                            Voice</button>
+                    </div>
                     <input type="file" id="voiceUploadInput" accept="audio/*" capture="microphone"
                         style="display: none;" onchange="uploadVoiceFile(event)">
                     <p id="speakStatus"></p>
@@ -593,6 +652,86 @@
                 });
         }
 
+        const audioUiState = {
+            listening: false,
+            speaking: false,
+            sending: false,
+        };
+
+        let listenAbortController = null;
+        let currentListenAudio = null;
+        let browserMicAllowed = true;
+
+        function updateAudioButtons() {
+            const listenBtn = document.getElementById('listenNowBtn');
+            const startBtn = document.getElementById('voiceStartBtn');
+            const stopBtn = document.getElementById('voiceStopBtn');
+            const uploadBtn = document.getElementById('voiceUploadBtn');
+
+            const controlsBusy = audioUiState.sending;
+
+            if (listenBtn) {
+                listenBtn.disabled = audioUiState.speaking || controlsBusy;
+                listenBtn.textContent = audioUiState.listening ? 'Stop Hear' : 'Hear Now';
+                listenBtn.title = audioUiState.speaking ? 'Disabled while sending mic audio' : (controlsBusy ? 'Please wait for current audio action' : '');
+            }
+
+            if (startBtn) {
+                if (!voiceCapture.running) {
+                    startBtn.disabled = controlsBusy || !browserMicAllowed;
+                }
+                if (controlsBusy) {
+                    startBtn.title = 'Please wait for current audio action';
+                }
+            }
+
+            if (stopBtn) {
+                if (!voiceCapture.running) {
+                    stopBtn.disabled = true;
+                }
+                if (controlsBusy) {
+                    stopBtn.disabled = true;
+                }
+            }
+
+            if (uploadBtn) {
+                uploadBtn.disabled = audioUiState.speaking || controlsBusy;
+            }
+        }
+
+        function waitMs(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+
+        function playBlob(blob) {
+            return new Promise((resolve, reject) => {
+                const blobUrl = URL.createObjectURL(blob);
+                const player = new Audio(blobUrl);
+                currentListenAudio = player;
+                player.onended = () => {
+                    if (currentListenAudio === player) {
+                        currentListenAudio = null;
+                    }
+                    URL.revokeObjectURL(blobUrl);
+                    resolve();
+                };
+                player.onerror = () => {
+                    if (currentListenAudio === player) {
+                        currentListenAudio = null;
+                    }
+                    URL.revokeObjectURL(blobUrl);
+                    reject(new Error('Audio playback failed'));
+                };
+                player.play().catch(err => {
+                    if (currentListenAudio === player) {
+                        currentListenAudio = null;
+                    }
+                    URL.revokeObjectURL(blobUrl);
+                    reject(err);
+                });
+            });
+        }
+
         async function listenFromDevice() {
             const status = document.getElementById('speakStatus');
             const btn = document.getElementById('listenNowBtn');
@@ -600,36 +739,93 @@
                 return;
             }
 
+            if (audioUiState.speaking) {
+                status.textContent = 'Hear Now pauses while mic talk is active.';
+                status.style.color = '#d32f2f';
+                return;
+            }
+
+            if (audioUiState.sending) {
+                status.textContent = 'Please wait for the current audio action.';
+                status.style.color = '#d32f2f';
+                return;
+            }
+
+            if (audioUiState.listening) {
+                audioUiState.listening = false;
+                if (listenAbortController) {
+                    listenAbortController.abort();
+                    listenAbortController = null;
+                }
+                if (currentListenAudio) {
+                    try {
+                        currentListenAudio.pause();
+                    } catch (_) {
+                        // Ignore pause race conditions.
+                    }
+                }
+                updateAudioButtons();
+                status.textContent = 'Hear Now stopped.';
+                status.style.color = '#666';
+                return;
+            }
+
             try {
-                btn.disabled = true;
-                status.textContent = 'Capturing microphone audio from device...';
+                audioUiState.listening = true;
+                updateAudioButtons();
+                status.textContent = 'Hear Now active. Tap Stop Hear to end.';
                 status.style.color = '#666';
 
-                const response = await fetch('/api/audio/listen?seconds=8');
-                if (!response.ok) {
-                    let message = 'Unable to capture microphone audio';
+                while (audioUiState.listening && !audioUiState.speaking) {
+                    listenAbortController = new AbortController();
+                    const timeoutId = setTimeout(() => {
+                        if (listenAbortController) {
+                            listenAbortController.abort();
+                        }
+                    }, 9000);
+
+                    let response = null;
                     try {
-                        const errJson = await response.json();
-                        message = errJson.error || message;
-                    } catch (_) {
-                        // Non-JSON error body; keep generic message.
+                        response = await fetch('/api/audio/listen?seconds=3', {
+                            signal: listenAbortController.signal,
+                        });
+                    } finally {
+                        clearTimeout(timeoutId);
                     }
-                    throw new Error(message);
+                    if (!response.ok) {
+                        let message = 'Unable to capture microphone audio';
+                        try {
+                            const errJson = await response.json();
+                            message = errJson.error || message;
+                        } catch (_) {
+                            // Non-JSON error body; keep generic message.
+                        }
+                        throw new Error(message);
+                    }
+
+                    const audioBlob = await response.blob();
+                    await playBlob(audioBlob);
+                    listenAbortController = null;
+
+                    // Tiny gap keeps the loop responsive and avoids tight polling.
+                    await waitMs(80);
                 }
-
-                const audioBlob = await response.blob();
-                const blobUrl = URL.createObjectURL(audioBlob);
-                const player = new Audio(blobUrl);
-                player.onended = () => URL.revokeObjectURL(blobUrl);
-                await player.play();
-
-                status.textContent = 'Playing live device microphone sample.';
-                status.style.color = '#2e7d32';
             } catch (err) {
-                status.textContent = err.message || 'Listen failed';
-                status.style.color = '#d32f2f';
+                if (err && err.name === 'AbortError') {
+                    status.textContent = audioUiState.listening ? 'Hear Now interrupted. Retrying...' : 'Hear Now stopped.';
+                    status.style.color = '#666';
+                } else {
+                    status.textContent = err.message || 'Listen failed';
+                    status.style.color = '#d32f2f';
+                }
             } finally {
-                btn.disabled = false;
+                const wasSpeaking = audioUiState.speaking;
+                listenAbortController = null;
+                audioUiState.listening = false;
+                updateAudioButtons();
+                if (!wasSpeaking) {
+                    status.textContent = status.textContent || 'Hear Now stopped.';
+                }
             }
         }
 
@@ -641,7 +837,42 @@
             chunks: [],
             sampleRate: 44100,
             running: false,
+            recordingTimeout: null,
         };
+
+        const MAX_VOICE_CAPTURE_MS = 20000;
+
+        function configureVoiceControls() {
+            const status = document.getElementById('speakStatus');
+            const startBtn = document.getElementById('voiceStartBtn');
+            const stopBtn = document.getElementById('voiceStopBtn');
+
+            if (!status || !startBtn || !stopBtn) {
+                return;
+            }
+
+            updateAudioButtons();
+
+            const hasMicApi = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+            const isLocalHost = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+            const micAllowed = hasMicApi && (window.isSecureContext || isLocalHost);
+            browserMicAllowed = micAllowed;
+
+            if (micAllowed) {
+                return;
+            }
+
+            startBtn.disabled = true;
+            stopBtn.disabled = true;
+            startBtn.title = 'Live mic needs HTTPS or localhost in most browsers';
+
+            if (!hasMicApi) {
+                status.textContent = 'Live mic capture is unavailable in this browser. Use Upload Voice.';
+            } else {
+                status.textContent = 'Live mic needs HTTPS on this page. Upload Voice works on HTTP.';
+            }
+            status.style.color = '#d32f2f';
+        }
 
         function mergeFloat32(chunks, totalLength) {
             const out = new Float32Array(totalLength);
@@ -651,6 +882,58 @@
                 offset += chunk.length;
             }
             return out;
+        }
+
+        function downsampleFloat32(samples, inputRate, outputRate) {
+            if (!samples || !samples.length || inputRate <= outputRate) {
+                return samples;
+            }
+            const ratio = inputRate / outputRate;
+            const newLength = Math.max(1, Math.round(samples.length / ratio));
+            const result = new Float32Array(newLength);
+
+            let resultOffset = 0;
+            let sourceOffset = 0;
+            while (resultOffset < result.length) {
+                const nextOffset = Math.round((resultOffset + 1) * ratio);
+                let accum = 0;
+                let count = 0;
+                for (let i = sourceOffset; i < nextOffset && i < samples.length; i++) {
+                    accum += samples[i];
+                    count += 1;
+                }
+                result[resultOffset] = count ? (accum / count) : 0;
+                resultOffset += 1;
+                sourceOffset = nextOffset;
+            }
+            return result;
+        }
+
+        async function sendVoiceDataUrl(dataUrl, pendingMessage) {
+            const status = document.getElementById('speakStatus');
+            audioUiState.sending = true;
+            updateAudioButtons();
+            try {
+                status.textContent = pendingMessage || 'Sending voice message...';
+                status.style.color = '#666';
+
+                const response = await fetch('/api/audio/play-upload', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ audio_base64: dataUrl })
+                });
+                const result = await response.json();
+
+                if (result.ok) {
+                    status.textContent = result.message || 'Voice message played on device';
+                    status.style.color = '#2e7d32';
+                    return;
+                }
+                throw new Error(result.error || 'Unable to play voice message');
+            } finally {
+                audioUiState.sending = false;
+                updateAudioButtons();
+            }
         }
 
         function encodeWav(samples, sampleRate) {
@@ -693,7 +976,7 @@
             const startBtn = document.getElementById('voiceStartBtn');
             const stopBtn = document.getElementById('voiceStopBtn');
 
-            if (voiceCapture.running) {
+            if (voiceCapture.running || audioUiState.sending) {
                 return;
             }
 
@@ -712,6 +995,12 @@
             }
 
             try {
+                if (audioUiState.listening) {
+                    audioUiState.listening = false;
+                    updateAudioButtons();
+                    await waitMs(100);
+                }
+
                 const stream = await navigator.mediaDevices.getUserMedia({
                     audio: {
                         echoCancellation: true,
@@ -732,6 +1021,16 @@
                 voiceCapture.chunks = [];
                 voiceCapture.sampleRate = audioContext.sampleRate || 44100;
                 voiceCapture.running = true;
+                audioUiState.speaking = true;
+
+                if (voiceCapture.recordingTimeout) {
+                    clearTimeout(voiceCapture.recordingTimeout);
+                }
+                voiceCapture.recordingTimeout = setTimeout(() => {
+                    if (voiceCapture.running) {
+                        stopVoiceCapture();
+                    }
+                }, MAX_VOICE_CAPTURE_MS);
 
                 processor.onaudioprocess = (evt) => {
                     if (!voiceCapture.running) {
@@ -746,9 +1045,12 @@
 
                 startBtn.disabled = true;
                 stopBtn.disabled = false;
+                updateAudioButtons();
                 status.textContent = 'Recording... tap Send Voice when done.';
                 status.style.color = '#0a8f5d';
             } catch (err) {
+                audioUiState.speaking = false;
+                updateAudioButtons();
                 status.textContent = `Microphone unavailable: ${err.message}`;
                 status.style.color = '#d32f2f';
             }
@@ -756,6 +1058,9 @@
 
         function triggerVoiceUpload() {
             const input = document.getElementById('voiceUploadInput');
+            if (audioUiState.sending || voiceCapture.running) {
+                return;
+            }
             if (input) {
                 input.value = '';
                 input.click();
@@ -769,6 +1074,12 @@
                 return;
             }
 
+            if (audioUiState.sending || voiceCapture.running) {
+                status.textContent = 'Please wait for current voice action to finish.';
+                status.style.color = '#d32f2f';
+                return;
+            }
+
             try {
                 const dataUrl = await new Promise((resolve, reject) => {
                     const reader = new FileReader();
@@ -777,23 +1088,7 @@
                     reader.readAsDataURL(file);
                 });
 
-                status.textContent = 'Uploading voice message...';
-                status.style.color = '#666';
-
-                const response = await fetch('/api/audio/play-upload', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ audio_wav_base64: dataUrl })
-                });
-                const result = await response.json();
-
-                if (result.ok) {
-                    status.textContent = result.message || 'Voice message played on device';
-                    status.style.color = '#2e7d32';
-                } else {
-                    status.textContent = result.error || 'Unable to play voice message';
-                    status.style.color = '#d32f2f';
-                }
+                await sendVoiceDataUrl(dataUrl, 'Uploading voice message...');
             } catch (err) {
                 status.textContent = err.message || 'Voice upload failed';
                 status.style.color = '#d32f2f';
@@ -810,12 +1105,24 @@
             }
 
             voiceCapture.running = false;
+            if (voiceCapture.recordingTimeout) {
+                clearTimeout(voiceCapture.recordingTimeout);
+                voiceCapture.recordingTimeout = null;
+            }
 
             try {
-                voiceCapture.processor.disconnect();
-                voiceCapture.source.disconnect();
-                voiceCapture.stream.getTracks().forEach(t => t.stop());
-                await voiceCapture.context.close();
+                if (voiceCapture.processor) {
+                    voiceCapture.processor.disconnect();
+                }
+                if (voiceCapture.source) {
+                    voiceCapture.source.disconnect();
+                }
+                if (voiceCapture.stream) {
+                    voiceCapture.stream.getTracks().forEach(t => t.stop());
+                }
+                if (voiceCapture.context) {
+                    await voiceCapture.context.close();
+                }
 
                 const totalLength = voiceCapture.chunks.reduce((acc, cur) => acc + cur.length, 0);
                 if (!totalLength) {
@@ -823,7 +1130,9 @@
                 }
 
                 const merged = mergeFloat32(voiceCapture.chunks, totalLength);
-                const wavBlob = encodeWav(merged, voiceCapture.sampleRate);
+                const targetRate = 16000;
+                const prepared = downsampleFloat32(merged, voiceCapture.sampleRate, targetRate);
+                const wavBlob = encodeWav(prepared, targetRate);
                 const dataUrl = await new Promise((resolve, reject) => {
                     const reader = new FileReader();
                     reader.onload = () => resolve(reader.result);
@@ -831,23 +1140,7 @@
                     reader.readAsDataURL(wavBlob);
                 });
 
-                status.textContent = 'Sending voice message to device...';
-                status.style.color = '#666';
-
-                const response = await fetch('/api/audio/play-upload', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ audio_wav_base64: dataUrl })
-                });
-                const result = await response.json();
-
-                if (result.ok) {
-                    status.textContent = result.message || 'Voice message played on device';
-                    status.style.color = '#2e7d32';
-                } else {
-                    status.textContent = result.error || 'Unable to play voice message';
-                    status.style.color = '#d32f2f';
-                }
+                await sendVoiceDataUrl(dataUrl, 'Sending voice message to device...');
             } catch (err) {
                 status.textContent = err.message || 'Voice capture failed';
                 status.style.color = '#d32f2f';
@@ -857,8 +1150,12 @@
                 voiceCapture.processor = null;
                 voiceCapture.source = null;
                 voiceCapture.chunks = [];
+                voiceCapture.running = false;
+                voiceCapture.recordingTimeout = null;
+                audioUiState.speaking = false;
                 startBtn.disabled = false;
                 stopBtn.disabled = true;
+                updateAudioButtons();
             }
         }
 
@@ -875,6 +1172,8 @@
                 }
             })
             .catch(e => console.log('Nanny cam status check skipped'));
+
+        configureVoiceControls();
     </script>
 </body>
 

@@ -146,22 +146,27 @@ class RpicamStreamer:
                 self.rpicam_path,
                 '--width', str(self.width),
                 '--height', str(self.height),
-                '-t', '50',  # Reduced timeout 50ms for faster capture
+                '-t', '200',  # 200ms settle time — stable across OV5647, IMX219, IMX708
                 '-o', '-',  # Output to stdout
                 '--nopreview',
                 '--quality', str(self.quality),
-                '--rotation', str(self.rotation),
             ]
 
+            # Only add rotation if non-zero; some sensors ignore it anyway
+            if self.rotation:
+                cmd += ['--rotation', str(self.rotation)]
             if self.hflip:
                 cmd.append('--hflip')
             if self.vflip:
                 cmd.append('--vflip')
+
+            # Disable autofocus speed penalty on cameras that support it (IMX708, IMX477)
+            cmd += ['--autofocus-mode', 'manual']
             
             result = subprocess.run(
                 cmd,
                 capture_output=True,
-                timeout=self.capture_timeout,  # Use capture_timeout instead of self.timeout
+                timeout=self.capture_timeout,
                 text=False
             )
             
@@ -172,10 +177,21 @@ class RpicamStreamer:
                     self.last_frame_time = time.time()
                 self.consecutive_failures = 0
                 return result.stdout
+
+            if result.returncode != 0:
+                logger.debug(f"[RPICAM] rpicam exited {result.returncode}: {result.stderr[:120].decode(errors='replace')}")
+                self.consecutive_failures += 1
                     
-        except subprocess.TimeoutExpired:
-            logger.debug("[RPICAM] Frame capture timeout")
+        except subprocess.TimeoutExpired as exc:
+            # Kill timed-out process and wait for pipeline to fully release
+            try:
+                exc.process.kill()
+                exc.process.wait(timeout=1)
+            except Exception:
+                pass
+            logger.debug("[RPICAM] Frame capture timeout — pipeline stall, backing off")
             self.consecutive_failures += 1
+            time.sleep(0.5)  # Allow kernel media pipeline to release before next attempt
         except Exception as e:
             logger.debug(f"[RPICAM] Frame capture error: {e}")
             self.consecutive_failures += 1
@@ -193,30 +209,39 @@ class RpicamStreamer:
                         self.frame_count += 1
                         self.last_frame_time = time.time()
                     self.consecutive_failures = 0
-                elif self.consecutive_failures > 25:
-                    logger.warning("[RPICAM] Too many capture failures, backing off before retry")
-                    time.sleep(1.0)
+                elif self.consecutive_failures > 5:
+                    # Back off quickly to let the kernel media pipeline fully release
+                    logger.warning(f"[RPICAM] {self.consecutive_failures} consecutive failures, pausing 3s")
+                    time.sleep(3.0)
                     self.consecutive_failures = 0
-                time.sleep(0.020)  # ~50 FPS potential (actual will be 20-30 FPS due to capture time)
+                time.sleep(0.050)  # 50ms inter-capture gap — prevents pipeline thrashing
             except Exception as e:
                 logger.debug(f"[RPICAM] Continuous capture error: {e}")
-                time.sleep(0.05)
+                time.sleep(0.1)
     
     def start(self):
         """Start camera using background capture thread for better performance"""
         try:
             self.running = True
+            self.consecutive_failures = 0
             
-            # Pre-warm camera with test captures
+            # Pre-warm: attempt up to 3 captures; first one may fail on some sensors
             logger.info("[RPICAM] Pre-warming camera with single-shot mode...")
+            warmup_ok = False
             for i in range(3):
                 frame = self._capture_single_frame()
-                if frame and len(frame) > 1000:
+                if frame and len(frame) > 500:
                     self.last_frame = frame
                     self.frame_count = 1
-                    logger.success(f"[RPICAM] Camera ready - Frame {i+1} captured ({len(frame)} bytes)")
+                    logger.success(f"[RPICAM] Camera ready — Frame {i+1} captured ({len(frame)} bytes)")
+                    warmup_ok = True
                     break
-                time.sleep(0.3)
+                time.sleep(0.5)
+
+            if not warmup_ok:
+                logger.error("[RPICAM] Warmup failed — no frames captured. Camera likely unavailable.")
+                self.running = False
+                return False
             
             # Start background capture thread for continuous streaming
             self.capture_thread = threading.Thread(target=self._continuous_capture, daemon=True)

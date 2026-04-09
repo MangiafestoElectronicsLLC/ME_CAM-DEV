@@ -1,0 +1,34 @@
+# Quick SSL Certificate Generation - Copy & Paste This
+
+# ====== OPTION 1: Run on Pi via SSH ======
+# Copy this entire line and run on Windows PowerShell:
+
+ssh pi@mecamdev2.local "mkdir -p ~/ME_CAM-DEV/certs && openssl genrsa -out ~/ME_CAM-DEV/certs/private_key.pem 2048 && openssl req -new -x509 -key ~/ME_CAM-DEV/certs/private_key.pem -out ~/ME_CAM-DEV/certs/certificate.pem -days 365 -subj '/C=US/ST=NY/L=Brockport/O=ME_CAM/CN=me_cam.com' -addext 'subjectAltName=DNS:me_cam.com,DNS:localhost,DNS:*.local,IP:127.0.0.1' && chmod 600 ~/ME_CAM-DEV/certs/private_key.pem && chmod 644 ~/ME_CAM-DEV/certs/certificate.pem && echo 'Certificates ready!' && sudo systemctl restart mecamera && echo 'Service restarted!'"
+
+# ====== OPTION 2: Generate on Windows, Upload to Pi ======
+# Step 1 - From Windows PowerShell, in the ME_CAM-DEV folder:
+
+md certs_temp
+openssl genrsa -out certs_temp\private_key.pem 2048
+openssl req -new -x509 -key certs_temp\private_key.pem -out certs_temp\certificate.pem -days 365 -subj "/C=US/ST=NY/L=Brockport/O=ME_CAM/CN=me_cam.com" -addext "subjectAltName=DNS:me_cam.com,DNS:localhost,DNS:*.local,IP:127.0.0.1"
+
+# Step 2 - Upload to Pi:
+
+ssh pi@mecamdev2.local "mkdir -p ~/ME_CAM-DEV/certs"
+scp certs_temp\certificate.pem pi@mecamdev2.local:~/ME_CAM-DEV/certs/
+scp certs_temp\private_key.pem pi@mecamdev2.local:~/ME_CAM-DEV/certs/
+
+# Step 3 - Set permissions and restart:
+
+ssh pi@mecamdev2.local "chmod 600 ~/ME_CAM-DEV/certs/private_key.pem && chmod 644 ~/ME_CAM-DEV/certs/certificate.pem && sudo systemctl restart mecamera"
+
+# Step 4 - Verify:
+
+ssh pi@mecamdev2.local "tail -10 ~/ME_CAM-DEV/logs/mecam_lite.log"
+
+# Should show:
+# [HTTPS] Running with SSL/TLS (https://me_cam.com:8080)
+
+# Clean up local temp files:
+rm -r certs_temp
+

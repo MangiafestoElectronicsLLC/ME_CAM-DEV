@@ -50,12 +50,22 @@ class BatteryMonitor:
             if not os.path.exists(power_supply_path):
                 return "unknown"
             
+            supply_names = [name for name in os.listdir(power_supply_path) if name and not name.startswith('.')]
+            if not supply_names:
+                return "unknown"
+
+            saw_battery_supply = False
+
             # Look for AC or USB supplies with online=1
-            for supply_name in os.listdir(power_supply_path):
+            for supply_name in supply_names:
                 supply_path = os.path.join(power_supply_path, supply_name)
                 try:
+                    lowered = supply_name.lower()
+                    if lowered.startswith("bat") or "battery" in lowered:
+                        saw_battery_supply = True
+
                     # Check if this is an AC adapter (wall power)
-                    if "ac" in supply_name.lower():
+                    if "ac" in lowered or "mains" in lowered:
                         online_path = os.path.join(supply_path, "online")
                         if os.path.exists(online_path):
                             with open(online_path, "r") as f:
@@ -63,7 +73,7 @@ class BatteryMonitor:
                                     return "wall_adapter"
                     
                     # Check if this is a USB supply
-                    if "usb" in supply_name.lower():
+                    if "usb" in lowered:
                         online_path = os.path.join(supply_path, "online")
                         if os.path.exists(online_path):
                             with open(online_path, "r") as f:
@@ -83,15 +93,29 @@ class BatteryMonitor:
                                     return "usb_adapter"
                 except Exception:
                     continue
-            
-            return "battery"
+
+            if saw_battery_supply:
+                return "battery"
+            return "unknown"
         except Exception as e:
             logger.debug(f"Power source detection error: {e}")
             return "unknown"
 
     def get_status(self):
         if not self.enabled:
-            return {"enabled": False, "percent": None, "is_low": False, "external_power": None}
+            # Still detect power source so UI shows "Wall Power" / "USB Adapter"
+            # instead of "Unknown" on devices without a battery HAT.
+            power_source = self._detect_power_source()
+            external_power = power_source in ("wall_adapter", "usb_adapter")
+            return {
+                "enabled": False,
+                "percent": None,
+                "is_low": False,
+                "external_power": external_power,
+                "power_source": power_source,
+                "battery_present": False,
+                "note": "Battery monitoring disabled; power source detected from system.",
+            }
 
         cfg = get_config()
         percent_override = cfg.get("battery_percent_override")
@@ -126,6 +150,10 @@ class BatteryMonitor:
         # Detect actual power source instead of relying on undervolt detection
         power_source = self._detect_power_source()
         external_power = power_source in ["wall_adapter", "usb_adapter"]
+        # Do not assume charging when telemetry is missing. Unknown should
+        # remain non-external to avoid false "charging" positives.
+        if power_source == "unknown" and percent is None and not undervolt_now:
+            external_power = False
         
         # Runtime estimate (only meaningful when capacity percentage is known).
         # Defaults reflect common USB power-bank conversion losses.
